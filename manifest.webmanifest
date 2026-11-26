@@ -1,0 +1,16 @@
+{
+  "name": "Cartelle Spotify",
+  "short_name": "Cartelle",
+  "description": "Le tue playlist Spotify raccolte in cartelle, con casuale a criteri.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "lang": "it",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
