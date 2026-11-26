@@ -1,5 +1,5 @@
 // Chiamate alla Web API di Spotify, con rinnovo automatico dell'accesso e attesa sui limiti.
-import { getAccessToken, refresh } from './auth.js';
+import { getAccessToken, refresh } from './auth.js?v=2';
 
 const BASE = 'https://api.spotify.com/v1';
 
@@ -71,6 +71,23 @@ export const devices = async () => (await spotify('/me/player/devices')).devices
 
 // Numero di brani di una playlist (Spotify ha rinominato "tracks" in "items" nel 2026).
 export const trackCount = (p) => p.items?.total ?? p.tracks?.total ?? 0;
+
+// Brani di una playlist (solo per le playlist proprie o in collaborazione).
+// Spotify nel 2026 ha rinominato "track" in "item": si leggono tutti e due.
+export async function playlistTracks(playlistId) {
+  const rows = await getAll(`/playlists/${playlistId}/items`);
+  return rows
+    .map((r) => r.item ?? r.track)
+    .filter((t) => t && t.type === 'track' && t.uri && !t.is_local);
+}
+
+// Fa partire una playlist da un brano preciso.
+export async function playFromTrack(playlist, trackUri, deviceId) {
+  await spotify('/me/player/play', {
+    method: 'PUT', query: { device_id: deviceId },
+    body: { context_uri: playlist.uri, offset: { uri: trackUri } },
+  });
+}
 
 // Fa partire una playlist intera in ordine casuale: si parte da un brano a caso e poi si attiva lo shuffle
 // (lo shuffle si può attivare solo dopo, quando il dispositivo è già in riproduzione).

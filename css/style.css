@@ -73,12 +73,24 @@ input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 .profile h2 { margin: 0; }
 .profile p { margin: 2px 0 0; }
 
-.playlists { list-style: none; padding: 0; margin: 8px 0 0; }
-.playlists li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #2c2c2c; }
-.playlists img, .playlists .cover { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: var(--card-2); flex: none; }
-.pl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.pl-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list { list-style: none; padding: 0; margin: 8px 0 0; }
+.list li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #2c2c2c; }
+.list li:first-child { border-top: 0; }
+.list li.tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.list li.tap:active { background: var(--card-2); }
+.list .cover { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: var(--card-2); flex: none; }
+.tracks .cover { width: 40px; height: 40px; }
+.txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.txt .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button.play { width: 44px; flex: none; background: var(--accent); color: #062b27; font-size: 1rem; }
+
+.back { margin: 0 0 4px; padding-left: 0; text-decoration: none; }
+.pl-head { display: flex; gap: 14px; align-items: center; }
+.pl-head > div { flex: 1; min-width: 0; }
+.pl-head h2 { margin: 0; overflow-wrap: anywhere; }
+.pl-head p { margin: 2px 0 0; }
+.pl-head .primary { margin-top: 10px; }
+.big-cover { width: 96px; height: 96px; border-radius: 8px; object-fit: cover; background: var(--card-2); flex: none; }
 
 #toast {
   position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px);
