@@ -1,9 +1,10 @@
-import * as auth from './auth.js?v=5';
-import * as api from './api.js?v=5';
-import * as folders from './folders.js?v=5';
-import * as lib from './library.js?v=5';
-import * as crit from './criteria.js?v=5';
-import * as catalog from './catalog.js?v=5';
+import * as auth from './auth.js?v=6';
+import * as api from './api.js?v=6';
+import * as folders from './folders.js?v=6';
+import * as lib from './library.js?v=6';
+import * as crit from './criteria.js?v=6';
+import * as catalog from './catalog.js?v=6';
+import * as tags from './tags.js?v=6';
 
 const app = document.getElementById('app');
 const btnLogout = document.getElementById('btn-logout');
@@ -297,7 +298,8 @@ function showHome() {
             <button class="play" data-play-m="${esc(m.id)}" aria-label="Fai partire ${esc(m.name)}">▶</button>
           </li>`).join('')}
       </ul>
-      <button id="btn-criteria" class="small">🎲 Scegli i criteri</button>
+      <div class="row"><button id="btn-criteria" class="small">🎲 Scegli i criteri</button>
+      <button id="btn-rate" class="small">🎧 Valuta il brano in ascolto</button></div>
     </section>
 
     <section class="card">
@@ -319,6 +321,7 @@ function showHome() {
     </section>`;
 
   document.getElementById('btn-criteria').onclick = () => { location.hash = '#/casuale'; };
+  document.getElementById('btn-rate').onclick = () => rateNowPlaying();
   document.getElementById('btn-catalog').onclick = () => { location.hash = '#/catalogo'; };
   app.querySelector('.moods').addEventListener('click', (ev) => {
     const btn = ev.target.closest('[data-play-m]');
@@ -501,17 +504,44 @@ async function showPlaylist(id) {
 const LAST_KEY = 'sp_last_criteria';
 const readLast = () => { try { return JSON.parse(localStorage.getItem(LAST_KEY)) || {}; } catch { return {}; } };
 
+const DECADE_LABEL = (d) => (d < 2000 ? `Anni '${String(d).slice(2)}` : `Anni ${d}`);
+const yearsText = (c) => [...(c.decades || []).map((d) => (d < 2000 ? `'${String(d).slice(2)}` : String(d).slice(0, 3) + '0')), ...(c.years || [])].join(', ');
+
+const OPTIONS = {
+  origin: [['any', 'Indifferente'], ['it', '🇮🇹 Italiani'], ['foreign', '🌍 Stranieri']],
+  explicit: [['any', 'Indifferente'], ['no', 'Senza parolacce'], ['only', 'Solo espliciti 🅴']],
+  versions: [['any', 'Tutte'], ['orig', 'Solo originali'], ['only', 'Solo remix, live, sped up…']],
+  feat: [['any', 'Indifferente'], ['solo', 'Artista da solo'], ['feat', 'Solo collaborazioni (feat.)']],
+  liked: [['any', 'Indifferente'], ['yes', '💚 Solo quelli che ti piacciono'], ['no', 'Solo quelli non salvati']],
+  vote: [['nodown', 'Salta i 👎'], ['up', 'Solo i 👍'], ['any', 'Tutti']],
+  added: [['any', 'Indifferente'], ['month', 'Nell\'ultimo mese'], ['half', 'Negli ultimi 6 mesi'], ['old', 'Più di un anno fa']],
+  pop: [['any', 'Indifferente'], ['hit', '🔝 Successi'], ['niche', '💎 Poco conosciuti']],
+  listen: [['any', 'Indifferente'], ['fav', '⭐ I miei preferiti'], ['forgotten', '💤 Non li sento da tanto']],
+  lengths: [['short', 'Corti (meno di 3 min)'], ['mid', 'Medi (3–5 min)'], ['long', 'Lunghi (più di 5 min)']],
+  limit: [[0, 'Tutti'], [20, '20'], [50, '50'], [100, '100'], [200, '200']],
+  minutes: [[0, 'Senza limite'], [30, '30 min'], [60, '1 ora'], [120, '2 ore'], [180, '3 ore']],
+};
+const optLabel = (k, v) => OPTIONS[k].find(([x]) => x === v)?.[1] || '';
+
 function describe(c) {
+  c = { ...crit.empty(), ...c };
   const p = [];
   if (c.source?.startsWith('folder:')) p.push('📁 ' + (folders.get(c.source.slice(7))?.name || 'cartella eliminata'));
   else if (c.source === 'liked') p.push('Brani che ti piacciono');
-  if (c.genresIn?.length) p.push(c.genresIn.slice(0, 3).join(', ') + (c.genresIn.length > 3 ? '…' : ''));
-  if (c.artistsIn?.length) p.push(`${c.artistsIn.length} ${c.artistsIn.length === 1 ? 'artista' : 'artisti'}`);
-  if (c.genresOut?.length || c.artistsOut?.length) p.push('con esclusioni');
+  if (c.decades.length || c.years.length) p.push(yearsText(c));
   if (c.yearFrom || c.yearTo) p.push(`${c.yearFrom || '…'}–${c.yearTo || '…'}`);
-  if (c.listen === 'fav') p.push('preferiti');
-  if (c.listen === 'forgotten') p.push('non sentiti da tanto');
+  const fams = c.famIn.map((f) => (f === crit.NO_GENRE ? 'senza genere' : tags.familyName(f)));
+  const named = [...fams, ...c.genresIn];
+  if (named.length) p.push(named.slice(0, 3).join(', ') + (named.length > 3 ? '…' : ''));
+  if (c.moodsIn.length) p.push(c.moodsIn.map(tags.moodName).join(', '));
+  if (c.artistsIn.length) p.push(`${c.artistsIn.length} ${c.artistsIn.length === 1 ? 'artista' : 'artisti'}`);
+  if (c.genresOut.length || c.famOut.length || c.moodsOut.length || c.artistsOut.length) p.push('con esclusioni');
+  for (const k of ['origin', 'explicit', 'versions', 'feat', 'liked', 'added', 'pop', 'listen']) if (c[k] !== 'any') p.push(optLabel(k, c[k]).replace(/^[^\p{L}\d']+/u, '').toLowerCase());
+  if (c.vote === 'up') p.push('solo 👍');
+  if (c.lengths.length) p.push(c.lengths.map((l) => optLabel('lengths', l).split(' (')[0].toLowerCase()).join('/'));
   if (c.skipRecent) p.push('niente ascolti recenti');
+  if (c.limit) p.push(`${c.limit} brani`);
+  if (c.minutes) p.push(optLabel('minutes', c.minutes));
   return p.join(' · ') || 'Tutto in casuale';
 }
 
@@ -527,21 +557,27 @@ function poolFor(source) {
 let listenReady = null;
 const loadListening = () => (listenReady ??= Promise.all([lib.loadTop(), lib.syncHistory()]).catch(() => { listenReady = null; }));
 
+// Prima di filtrare: generi degli artisti se servono, Brani che ti piacciono se servono.
+const needsGenres = (c) => c.genresIn.length || c.genresOut.length || c.famIn.length || c.famOut.length
+  || c.moodsIn.length || c.moodsOut.length || c.origin !== 'any';
+const needsLiked = (c) => c.liked !== 'any' && !lib.likedKnown();
+
 async function playFiltered(pool, c, deviceId) {
-  const uris = shuffle(crit.filter(pool, c).map((t) => t.uri)).slice(0, MAX_MIX);
-  if (!uris.length) return 'Nessun brano corrisponde ai criteri';
-  await api.playUris(uris, deviceId);
-  return `▶ ${uris.length} ${uris.length === 1 ? 'brano' : 'brani'} in casuale`;
+  const list = crit.pick(crit.filter(pool, c), c, MAX_MIX);
+  if (!list.length) return 'Nessun brano corrisponde ai criteri';
+  await api.playUris(list.map((t) => t.uri), deviceId);
+  const min = Math.round(list.reduce((s, t) => s + (t.ms || 210_000), 0) / 60_000);
+  return `▶ ${list.length} ${list.length === 1 ? 'brano' : 'brani'} in casuale (${min >= 90 ? `${Math.round(min / 6) / 10} ore` : `${min} min`})`;
 }
 
-// Fa partire un mood salvato direttamente dalla pagina principale.
+// Fa partire un mix salvato direttamente dalla pagina principale.
 function playMood(m) {
   if (!m) return;
   toast(`Preparo “${m.name}”…`, 15000);
   play(async (d) => {
     const c = { ...crit.empty(), ...m.criteria };
-    const [pool] = await Promise.all([poolFor(c.source), loadListening()]);
-    if (c.genresIn.length || c.genresOut.length) await lib.fetchGenres(lib.missingArtists(pool)).catch(() => {});
+    const [pool] = await Promise.all([poolFor(c.source), loadListening(), needsLiked(c) ? lib.likedTracks().catch(() => {}) : null]);
+    if (needsGenres(c)) await lib.fetchGenres(lib.missingArtists(pool)).catch(() => {});
     return playFiltered(pool, c, d);
   }, m.name);
 }
@@ -558,11 +594,17 @@ function cycle(c, inKey, outKey, value) {
   }
 }
 
-function triChip(label, value, c, inKey, outKey, n) {
+function triChip(label, value, c, inKey, outKey, n, extra = '') {
   const st = c[inKey].includes(value) ? 'on' : c[outKey].includes(value) ? 'off' : '';
   const mark = st === 'on' ? '✓ ' : st === 'off' ? '✕ ' : '';
-  return `<button class="chip ${st}" data-v="${esc(value)}">${mark}${esc(label)}${n ? ` <span class="muted">${n}</span>` : ''}</button>`;
+  return `<button class="chip ${st} ${extra}" data-act="tri" data-in="${inKey}" data-out="${outKey}" data-v="${esc(value)}">${mark}${esc(label)}${n != null ? ` <span class="muted">${n}</span>` : ''}</button>`;
 }
+// Una sola scelta (es. Italiani / Stranieri).
+const oneChips = (c, k) => OPTIONS[k].map(([v, l]) =>
+  `<button class="chip ${c[k] === v ? 'on' : ''}" data-act="one" data-k="${k}" data-v="${v}" data-num="${typeof v === 'number' ? 1 : ''}">${l}</button>`).join('');
+// Più scelte insieme (es. anni '80 e '90).
+const manyChip = (c, k, v, label, n) =>
+  `<button class="chip ${c[k].includes(v) ? 'on' : ''}" data-act="many" data-k="${k}" data-v="${v}" data-num="${typeof v === 'number' ? 1 : ''}">${c[k].includes(v) ? '✓ ' : ''}${esc(label)}${n != null ? ` <span class="muted">${n}</span>` : ''}</button>`;
 
 async function showCriteria(moodId) {
   btnLogout.hidden = false;
@@ -574,7 +616,8 @@ async function showCriteria(moodId) {
   const ctrl = new AbortController();
   window.addEventListener('hashchange', () => ctrl.abort(), { once: true });
 
-  let pool = [], tl = { genres: [], artists: [] }, allGenres = false, genreStatus = '';
+  let pool = [], tl = crit.tally([]), genreStatus = '';
+  const showAll = { genres: false, years: false, fams: false };
 
   app.innerHTML = `
     <button class="link back" onclick="location.hash=''">← Home</button>
@@ -586,11 +629,14 @@ async function showCriteria(moodId) {
         <option value="liked">Solo Brani che ti piacciono</option>
         ${folders.list().map((f) => `<option value="folder:${esc(f.id)}">📁 ${esc(f.name)}</option>`).join('')}
       </select>
-      ${mood ? '<button id="btn-del-mood" class="link">Elimina questo mood</button>' : ''}
+      <div class="row between" style="margin-top:6px">
+        <button id="btn-reset" class="link">Azzera i filtri</button>
+        ${mood ? '<button id="btn-del-mood" class="link">Elimina questo mix</button>' : ''}
+      </div>
     </section>
     <div id="crit-body"><p class="muted center">Carico i tuoi brani…</p></div>
     <div class="bottom-bar">
-      <button id="btn-save" class="ghost">💾 Salva mood</button>
+      <button id="btn-save" class="ghost">💾 Salva mix</button>
       <button id="btn-go" class="primary" disabled>▶ Fai partire</button>
     </div>`;
   window.scrollTo(0, 0);
@@ -598,98 +644,156 @@ async function showCriteria(moodId) {
   const src = document.getElementById('src');
   src.value = c.source;
 
+  const count = (k) => {
+    const v = c[k];
+    if (Array.isArray(v)) return v.length;
+    return v && v !== crit.empty()[k] ? 1 : 0;
+  };
+  const sum = (...ks) => ks.reduce((s, k) => s + count(k), 0);
+  const badge = (n) => (n ? `<span class="badge">${n}</span>` : '');
+
+  // ---- Sezioni ----
+  const secYears = () => {
+    const ys = [...tl.years.keys()].sort((a, b) => b - a);
+    const decades = new Map();
+    for (const [y, n] of tl.years) { const d = Math.floor(y / 10) * 10; decades.set(d, (decades.get(d) || 0) + n); }
+    const yList = showAll.years ? ys : ys.filter((y, i) => i < 12 || c.years.includes(y));
+    const yMin = ys.at(-1) || 1950, yMax = ys[0] || new Date().getFullYear();
+    const yOpts = (sel) => `<option value="">Qualsiasi</option>` + Array.from({ length: yMax - yMin + 1 }, (_, i) => yMin + i)
+      .map((y) => `<option ${y === sel ? 'selected' : ''}>${y}</option>`).join('');
+    return `
+      <p class="muted small-text">Puoi sceglierne quanti vuoi: per esempio anni '80, anni '90 e il 2017.</p>
+      <h4>Decenni</h4>
+      <div class="chips">${[...decades.keys()].sort().map((d) => manyChip(c, 'decades', d, DECADE_LABEL(d), decades.get(d))).join('')}</div>
+      <h4>Anni singoli</h4>
+      <div class="chips">${yList.map((y) => manyChip(c, 'years', y, String(y), tl.years.get(y))).join('')}
+        ${ys.length > 12 && !showAll.years ? `<button class="chip add" data-act="all" data-k="years">Tutti gli anni (${ys.length})</button>` : ''}</div>
+      <h4>Oppure un intervallo</h4>
+      <div class="row years"><label>Dal <select data-sel="yearFrom">${yOpts(c.yearFrom)}</select></label>
+      <label>al <select data-sel="yearTo">${yOpts(c.yearTo)}</select></label></div>`;
+  };
+
+  const secGenres = () => {
+    const chosen = new Set([...c.genresIn, ...c.genresOut]);
+    const gList = showAll.genres ? tl.genres : tl.genres.filter((g, i) => i < 20 || chosen.has(g.name));
+    const fams = tl.fams.filter((f) => f.name !== crit.NO_GENRE);
+    const none = tl.fams.find((f) => f.name === crit.NO_GENRE);
+    return `
+      <p class="muted small-text">Tocca una volta per volerlo (✓), un'altra per escluderlo (✕), un'altra per tornare neutro.</p>
+      <p class="muted small-text">${esc(genreStatus)}</p>
+      <div class="chips">
+        ${fams.map((f) => triChip(tags.familyName(f.name), f.name, c, 'famIn', 'famOut', f.n)).join('')}
+        ${none ? triChip('Senza genere', crit.NO_GENRE, c, 'famIn', 'famOut', none.n) : ''}
+      </div>
+      ${none && !genreStatus ? `<p class="muted small-text">${none.n === 1 ? '1 brano non ha' : `${none.n} brani non hanno`} un genere su Spotify: quando li ascolti puoi indicarlo tu con “🎧 Valuta il brano in ascolto”.</p>` : ''}
+      <details ${chosen.size ? 'open' : ''}>
+        <summary>Generi precisi di Spotify (${tl.genres.length})</summary>
+        <div class="chips">
+          ${gList.map((g) => triChip(g.name, g.name, c, 'genresIn', 'genresOut', g.n)).join('')}
+          ${tl.genres.length > 20 && !showAll.genres ? `<button class="chip add" data-act="all" data-k="genres">Mostra tutti (${tl.genres.length})</button>` : ''}
+        </div>
+      </details>`;
+  };
+
+  const secMoods = () => `
+    <p class="muted small-text">Spotify non dice più se un brano è energico o tranquillo: il mood parte da un'ipotesi fatta sul genere e diventa preciso con le tue valutazioni. Hai valutato <b>${tags.ratedCount()}</b> ${tags.ratedCount() === 1 ? 'brano' : 'brani'}.</p>
+    <div class="chips">${tags.allMoods().map((m) => triChip(m.name, m.id, c, 'moodsIn', 'moodsOut', tl.moods.get(m.id) || 0)).join('')}</div>
+    <button class="small" data-act="rate">🎧 Valuta il brano in ascolto</button>`;
+
+  const secArtists = () => {
+    const q = (document.getElementById('a-q')?.value || '').trim().toLowerCase();
+    const chosen = new Set([...c.artistsIn, ...c.artistsOut]);
+    const list = q
+      ? tl.artists.filter((a) => a.name.toLowerCase().includes(q)).slice(0, 30)
+      : tl.artists.filter((a, i) => i < 20 || chosen.has(a.id));
+    return list.map((a) => triChip(a.name, a.id, c, 'artistsIn', 'artistsOut', a.n)).join('')
+      || '<span class="muted small-text">Nessun artista trovato</span>';
+  };
+
+  const secListen = () => `
+    <h4>Quanto li ascolti</h4><div class="chips">${oneChips(c, 'listen')}</div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-chk="skipRecent" ${c.skipRecent ? 'checked' : ''}> Salta i brani ascoltati da poco</label>
+    <h4>Brani che ti piacciono</h4><div class="chips">${oneChips(c, 'liked')}</div>
+    <h4>Le tue valutazioni</h4><div class="chips">${oneChips(c, 'vote')}</div>
+    <h4>Messi in playlist</h4><div class="chips">${oneChips(c, 'added')}</div>
+    <p class="muted small-text">Spotify fa vedere solo i tuoi 50 brani più ascoltati e gli ultimi 50 ascolti. Ogni volta che apri l'app li aggiungo a uno storico sul telefono, quindi questi criteri diventano più precisi col tempo.</p>`;
+
+  const secOther = () => `
+    <h4>Provenienza</h4><div class="chips">${oneChips(c, 'origin')}</div>
+    <p class="muted small-text">Secondo i generi di Spotify (es. “rap italiano”).</p>
+    <h4>Durata</h4><div class="chips">${OPTIONS.lengths.map(([v, l]) => manyChip(c, 'lengths', v, l, pool.filter((t) => crit.lengthOf(t) === v).length)).join('')}</div>
+    <h4>Versione</h4><div class="chips">${oneChips(c, 'versions')}</div>
+    <h4>Artisti</h4><div class="chips">${oneChips(c, 'feat')}</div>
+    <h4>Testi</h4><div class="chips">${oneChips(c, 'explicit')}</div>
+    ${pool.some((t) => t.popularity != null) ? `<h4>Fama</h4><div class="chips">${oneChips(c, 'pop')}</div>` : ''}`;
+
+  const secHow = () => `
+    <h4>Quanti brani</h4><div class="chips">${oneChips(c, 'limit')}</div>
+    <h4>Quanto deve durare</h4><div class="chips">${oneChips(c, 'minutes')}</div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-chk="spread" ${c.spread ? 'checked' : ''}> Mai lo stesso artista due volte di fila</label>`;
+
+  const SECTIONS = [
+    ['years', '📅 Anni', secYears, () => sum('decades', 'years', 'yearFrom', 'yearTo'), true],
+    ['genres', '🎵 Generi', secGenres, () => sum('famIn', 'famOut', 'genresIn', 'genresOut'), true],
+    ['moods', '🌈 Mood', secMoods, () => sum('moodsIn', 'moodsOut'), true],
+    ['artists', '🎤 Artisti', secArtists, () => sum('artistsIn', 'artistsOut'), false],
+    ['listen', '⭐ Ascolti e valutazioni', secListen, () => sum('listen', 'skipRecent', 'liked', 'added') + (c.vote === 'up' ? 1 : 0), false],
+    ['other', '🧩 Altri filtri', secOther, () => sum('origin', 'lengths', 'versions', 'feat', 'explicit', 'pop'), false],
+    ['how', '⏱️ Quanti e come', secHow, () => sum('limit', 'minutes'), false],
+  ];
+
   const update = () => {
     localStorage.setItem(LAST_KEY, JSON.stringify(c));
     const n = crit.filter(pool, c).length;
     const go = document.getElementById('btn-go');
     go.disabled = !n;
-    go.textContent = n ? `▶ Fai partire (${n} ${n === 1 ? 'brano' : 'brani'})` : 'Nessun brano corrisponde';
+    const shown = crit.pick(crit.filter(pool, c), c, MAX_MIX).length;
+    go.textContent = n ? `▶ Fai partire (${shown < n ? `${shown} di ` : ''}${n} ${n === 1 ? 'brano' : 'brani'})` : 'Nessun brano corrisponde';
   };
 
-  const renderGenres = () => {
-    const box = document.getElementById('g-chips');
-    if (!box) return;
-    document.getElementById('g-status').textContent = genreStatus;
-    const chosen = new Set([...c.genresIn, ...c.genresOut]);
-    const list = allGenres ? tl.genres : tl.genres.filter((g, i) => i < 20 || chosen.has(g.name));
-    box.innerHTML = list.map((g) => triChip(g.name, g.name, c, 'genresIn', 'genresOut', g.n)).join('')
-      + (tl.genres.length > 20 && !allGenres ? `<button class="chip add" data-all>Mostra tutti (${tl.genres.length})</button>` : '')
-      + (!tl.genres.length && !genreStatus ? '<span class="muted small-text">Spotify non indica generi per questi artisti.</span>' : '');
-  };
-
-  const renderArtists = () => {
-    const box = document.getElementById('a-chips');
-    if (!box) return;
-    const q = document.getElementById('a-q').value.trim().toLowerCase();
-    const chosen = new Set([...c.artistsIn, ...c.artistsOut]);
-    const list = q
-      ? tl.artists.filter((a) => a.name.toLowerCase().includes(q)).slice(0, 30)
-      : tl.artists.filter((a, i) => i < 20 || chosen.has(a.id));
-    box.innerHTML = list.map((a) => triChip(a.name, a.id, c, 'artistsIn', 'artistsOut', a.n)).join('')
-      || '<span class="muted small-text">Nessun artista trovato</span>';
+  const refresh = (only) => {
+    for (const [id, , fn, badgeFn] of SECTIONS) {
+      if (only && !only.includes(id)) continue;
+      const box = document.getElementById(`sec-${id}`);
+      if (!box) continue;
+      box.innerHTML = fn();
+      document.getElementById(`b-${id}`).innerHTML = badge(badgeFn());
+    }
+    update();
   };
 
   const render = () => {
-    const years = pool.map((t) => t.year).filter(Boolean);
-    const yMin = years.length ? Math.min(...years) : 1950, yMax = years.length ? Math.max(...years) : new Date().getFullYear();
-    const yOpts = (sel) => `<option value="">Qualsiasi</option>` + Array.from({ length: yMax - yMin + 1 }, (_, i) => yMin + i)
-      .map((y) => `<option ${y === sel ? 'selected' : ''}>${y}</option>`).join('');
-    body.innerHTML = `
-      <section class="card">
-        <h3>Generi</h3>
-        <p class="muted small-text">Tocca una volta per volerlo (✓), un'altra per escluderlo (✕), un'altra per tornare neutro.</p>
-        <p id="g-status" class="muted small-text"></p>
-        <div id="g-chips" class="chips"></div>
-      </section>
-      <section class="card">
-        <h3>Artisti</h3>
-        <input id="a-q" placeholder="Cerca un artista…" autocomplete="off">
-        <div id="a-chips" class="chips" style="margin-top:10px"></div>
-      </section>
-      <section class="card">
-        <h3>Anno di uscita</h3>
-        <div class="row years"><label>Dal <select id="y-from">${yOpts(c.yearFrom)}</select></label>
-        <label>al <select id="y-to">${yOpts(c.yearTo)}</select></label></div>
-      </section>
-      <section class="card">
-        <h3>Quanto li ascolti</h3>
-        <div class="chips" id="listen">
-          ${[['any', 'Indifferente'], ['fav', '⭐ I miei preferiti'], ['forgotten', '💤 Non li sento da tanto']]
-            .map(([v, l]) => `<button class="chip ${c.listen === v ? 'on' : ''}" data-l="${v}">${l}</button>`).join('')}
-        </div>
-        <label class="check" style="margin-top:12px"><input type="checkbox" id="skip-recent" ${c.skipRecent ? 'checked' : ''}> Salta i brani ascoltati da poco</label>
-        <p class="muted small-text">Spotify fa vedere solo i tuoi 50 brani più ascoltati e gli ultimi 50 ascolti. Ogni volta che apri l'app li aggiungo a uno storico sul telefono, quindi questi criteri diventano più precisi col tempo.</p>
-      </section>`;
-
-    renderGenres();
-    renderArtists();
-    update();
-
-    document.getElementById('g-chips').addEventListener('click', (ev) => {
-      const b = ev.target.closest('button');
-      if (!b) return;
-      if (b.dataset.all !== undefined) allGenres = true;
-      else cycle(c, 'genresIn', 'genresOut', b.dataset.v);
-      renderGenres(); update();
-    });
-    document.getElementById('a-chips').addEventListener('click', (ev) => {
-      const b = ev.target.closest('button');
-      if (!b) return;
-      cycle(c, 'artistsIn', 'artistsOut', b.dataset.v);
-      renderArtists(); update();
-    });
-    document.getElementById('a-q').addEventListener('input', renderArtists);
-    document.getElementById('y-from').onchange = (e) => { c.yearFrom = Number(e.target.value) || null; update(); };
-    document.getElementById('y-to').onchange = (e) => { c.yearTo = Number(e.target.value) || null; update(); };
-    document.getElementById('listen').addEventListener('click', (ev) => {
-      const b = ev.target.closest('button');
-      if (!b) return;
-      c.listen = b.dataset.l;
-      document.querySelectorAll('#listen .chip').forEach((x) => x.classList.toggle('on', x === b));
-      update();
-    });
-    document.getElementById('skip-recent').onchange = (e) => { c.skipRecent = e.target.checked; update(); };
+    body.innerHTML = SECTIONS.map(([id, title, , , open]) => `
+      <details class="card sec" ${open ? 'open' : ''}>
+        <summary><h3>${title} <span id="b-${id}"></span></h3></summary>
+        ${id === 'artists' ? '<input id="a-q" placeholder="Cerca un artista…" autocomplete="off" style="margin-bottom:10px">' : ''}
+        <div id="sec-${id}" class="${id === 'artists' ? 'chips' : ''}"></div>
+      </details>`).join('');
+    refresh();
+    document.getElementById('a-q').addEventListener('input', () => refresh(['artists']));
   };
+
+  body.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button[data-act]');
+    if (!b) return;
+    const { act, k } = b.dataset;
+    const v = b.dataset.num ? Number(b.dataset.v) : b.dataset.v;
+    if (act === 'tri') cycle(c, b.dataset.in, b.dataset.out, v);
+    else if (act === 'one') c[k] = v;
+    else if (act === 'many') c[k] = c[k].includes(v) ? c[k].filter((x) => x !== v) : [...c[k], v];
+    else if (act === 'all') showAll[k] = true;
+    else if (act === 'rate') { rateNowPlaying(() => { if (stillHere()) { tl = crit.tally(pool); refresh(); } }); return; }
+    if (k === 'liked' && needsLiked(c)) {
+      b.textContent = 'Leggo i Brani che ti piacciono…';
+      await lib.likedTracks().catch(() => toast('Non riesco a leggere i Brani che ti piacciono'));
+    }
+    refresh();
+  });
+  body.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (el.dataset.sel) { c[el.dataset.sel] = Number(el.value) || null; refresh(['years']); }
+    if (el.dataset.chk) { c[el.dataset.chk] = el.checked; refresh(); }
+  });
 
   const loadGenres = async () => {
     const missing = lib.missingArtists(pool);
@@ -699,8 +803,7 @@ async function showCriteria(moodId) {
       await lib.fetchGenres(missing, (d, t) => {
         genreStatus = `Leggo i generi degli artisti: ${d} di ${t} (solo la prima volta)`;
         if (!stillHere()) return;
-        if (d - last >= 25 || d === t) { last = d; tl = crit.tally(pool); renderGenres(); update(); }
-        else document.getElementById('g-status').textContent = genreStatus;
+        if (d - last >= 25 || d === t) { last = d; tl = crit.tally(pool); refresh(['genres', 'moods']); }
       }, ctrl.signal);
       genreStatus = '';
     } catch (e) {
@@ -708,14 +811,14 @@ async function showCriteria(moodId) {
         ? 'Spotify ha messo in pausa le richieste: i generi che mancano li leggo la prossima volta.'
         : '';
     }
-    if (stillHere()) { tl = crit.tally(pool); renderGenres(); update(); }
+    if (stillHere()) { tl = crit.tally(pool); refresh(); }
   };
 
   const load = async () => {
     body.innerHTML = '<p class="muted center">Carico i tuoi brani…</p>';
     document.getElementById('btn-go').disabled = true;
     try {
-      [pool] = await Promise.all([poolFor(c.source), loadListening()]);
+      [pool] = await Promise.all([poolFor(c.source), loadListening(), needsLiked(c) ? lib.likedTracks().catch(() => {}) : null]);
     } catch (e) {
       body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i brani: ${esc(e.message)}</p></section>`;
       return;
@@ -727,26 +830,117 @@ async function showCriteria(moodId) {
   };
 
   src.onchange = () => { c.source = src.value; load(); };
+  document.getElementById('btn-reset').onclick = () => {
+    Object.assign(c, crit.empty(), { source: c.source });
+    refresh();
+    toast('Filtri azzerati');
+  };
   document.getElementById('btn-go').onclick = () => {
     const label = mood?.name || 'Casuale con criteri';
     play((d) => playFiltered(pool, c, d), label);
   };
   document.getElementById('btn-save').onclick = async () => {
-    const name = await askName('Salva come mood', mood?.name || '');
+    const name = await askName('Salva come mix', mood?.name || '');
     if (!name) return;
     const m = crit.saveMood(name, structuredClone(c));
     history.replaceState(null, '', `#/casuale/${m.id}`);
     here = location.hash;
-    toast(`Mood “${name}” salvato: lo trovi nella pagina principale`);
+    toast(`Mix “${name}” salvato: lo trovi nella pagina principale`);
   };
   document.getElementById('btn-del-mood')?.addEventListener('click', async () => {
-    if (await confirmSheet(`Eliminare il mood “${mood.name}”?`, 'Elimina')) {
+    if (await confirmSheet(`Eliminare il mix “${mood.name}”?`, 'Elimina')) {
       crit.removeMood(mood.id);
       location.hash = '';
     }
   });
 
   load();
+}
+
+// ---------- Valuta il brano in ascolto: 👍/👎, mood e genere dell'artista ----------
+async function rateNowPlaying(onSaved) {
+  let t;
+  try { t = await api.nowPlaying(); } catch (e) { toast(`Non riesco a sapere cosa stai ascoltando: ${e.message}`); return; }
+  if (!t?.uri || t.type === 'episode') { toast('In questo momento non sta suonando nessun brano'); return; }
+  const track = { uri: t.uri, name: t.name, artists: (t.artists || []).map((a) => ({ id: a.id, name: a.name })) };
+  await lib.fetchGenres(lib.missingArtists([track])).catch(() => {});
+
+  const old = tags.ratingOf(track.uri) || { v: 0, m: [], x: [] };
+  const r = { v: old.v, m: [...old.m], x: [...old.x] };
+  const main = track.artists[0];
+  let fams = [...tags.artistFamilies(main?.id)];
+  const spotifyFams = new Set(tags.familiesOf({ ...track, artists: track.artists.map((a) => ({ id: a.id })) }).filter((f) => !fams.includes(f)));
+  const guessed = new Set(tags.moodsOf(track));
+
+  const s = sheet('<div id="rate"></div>');
+  const box = s.el.querySelector('#rate');
+  const draw = () => {
+    box.innerHTML = `
+      <div class="pl-head" style="margin-bottom:10px">
+        ${t.album?.images?.length ? `<img class="cover" style="width:64px;height:64px;border-radius:6px" src="${esc(t.album.images.at(-1).url)}" alt="">` : ''}
+        <div><b>${esc(track.name)}</b><p class="muted small-text">${esc(track.artists.map((a) => a.name).join(', '))}</p></div>
+      </div>
+      <div class="row">
+        <button class="chip big ${r.v === 1 ? 'on' : ''}" data-v="1">👍 Mi piace</button>
+        <button class="chip big ${r.v === -1 ? 'off' : ''}" data-v="-1">👎 Non mi piace</button>
+      </div>
+      <h4>Che mood ha?</h4>
+      <p class="muted small-text">✓ = sì, ✕ = no. Quelli tratteggiati sono un'ipotesi dell'app.</p>
+      <div class="chips" id="r-moods">
+        ${tags.allMoods().map((m) => {
+          const st = r.m.includes(m.id) ? 'on' : r.x.includes(m.id) ? 'off' : guessed.has(m.id) ? 'guess' : '';
+          return `<button class="chip ${st}" data-m="${esc(m.id)}">${st === 'on' ? '✓ ' : st === 'off' ? '✕ ' : ''}${esc(m.name)}</button>`;
+        }).join('')}
+        <button class="chip add" data-newm>+ Nuovo mood</button>
+      </div>
+      ${main ? `<h4>Genere di ${esc(main.name)}</h4>
+      <p class="muted small-text">${spotifyFams.size ? 'Quelli tratteggiati li dice già Spotify; puoi aggiungerne altri.' : 'Spotify non indica un genere per questo artista: sceglilo tu.'}</p>
+      <div class="chips" id="r-fams">
+        ${tags.FAMILIES.map((f) => `<button class="chip ${fams.includes(f.id) ? 'on' : spotifyFams.has(f.id) ? 'guess' : ''}" data-f="${f.id}">${fams.includes(f.id) ? '✓ ' : ''}${esc(f.name)}</button>`).join('')}
+      </div>` : ''}
+      <div class="row">
+        <button class="ghost" data-x>Annulla</button>
+        <button class="primary" data-ok>Salva</button>
+      </div>
+      <button class="small" data-next style="width:100%">Salva e passa al prossimo ⏭</button>`;
+  };
+  draw();
+
+  box.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    if (b.dataset.v) { const v = Number(b.dataset.v); r.v = r.v === v ? 0 : v; draw(); return; }
+    if (b.dataset.m) {
+      const id = b.dataset.m;
+      const st = r.m.includes(id) ? 'on' : r.x.includes(id) ? 'off' : '';
+      r.m = r.m.filter((x) => x !== id); r.x = r.x.filter((x) => x !== id);
+      if (st === '') r.m.push(id); else if (st === 'on') r.x.push(id);
+      draw(); return;
+    }
+    if (b.dataset.newm !== undefined) {
+      s.el.parentElement.hidden = true;
+      const name = await askName('Nuovo mood');
+      s.el.parentElement.hidden = false;
+      document.body.classList.add('no-scroll');
+      if (name) { const id = tags.addMood(name); if (!r.m.includes(id)) r.m.push(id); }
+      draw(); return;
+    }
+    if (b.dataset.f) { const f = b.dataset.f; fams = fams.includes(f) ? fams.filter((x) => x !== f) : [...fams, f]; draw(); return; }
+    if (b.dataset.x !== undefined) { s.close(); return; }
+    if (b.dataset.ok !== undefined || b.dataset.next !== undefined) {
+      tags.rate(track, r);
+      if (main) tags.setArtistFamilies(main.id, fams);
+      s.close();
+      let msg = 'Valutazione salvata';
+      if (r.v === 1 && old.v !== 1 && !lib.isLiked(track.uri)) {
+        try { await api.saveToLibrary([track.uri]); lib.markLiked(track.uri); msg += ' e aggiunto ai Brani che ti piacciono 💚'; }
+        catch (e) { msg += ` (non sono riuscito ad aggiungerlo ai Brani che ti piacciono: ${e.message})`; }
+      }
+      if (b.dataset.next !== undefined) await api.nextTrack().catch(() => {});
+      toast(msg);
+      onSaved?.();
+    }
+  });
 }
 
 // ---------- Catalogo per remix e mashup ----------

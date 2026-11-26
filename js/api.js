@@ -1,5 +1,5 @@
 // Chiamate alla Web API di Spotify, con rinnovo automatico dell'accesso e attesa sui limiti.
-import { getAccessToken, refresh } from './auth.js?v=5';
+import { getAccessToken, refresh } from './auth.js?v=6';
 
 const BASE = 'https://api.spotify.com/v1';
 
@@ -77,7 +77,7 @@ export const trackCount = (p) => p.items?.total ?? p.tracks?.total ?? 0;
 export async function playlistTracks(playlistId) {
   const rows = await getAll(`/playlists/${playlistId}/items`);
   return rows
-    .map((r) => r.item ?? r.track)
+    .map((r) => { const t = r.item ?? r.track; return t && { ...t, added_at: r.added_at }; })
     .filter((t) => t && t.type === 'track' && t.uri && !t.is_local);
 }
 
@@ -112,4 +112,22 @@ export async function playShuffled(playlist, deviceId) {
   if (total > 1) body.offset = { position: Math.floor(Math.random() * total) };
   await spotify('/me/player/play', { method: 'PUT', query: { device_id: deviceId }, body });
   await spotify('/me/player/shuffle', { method: 'PUT', query: { state: true, device_id: deviceId } }).catch(() => {});
+}
+
+// Brano in ascolto adesso (null se non suona niente).
+export async function nowPlaying() {
+  const d = await spotify('/me/player/currently-playing');
+  return d?.item ?? d?.track ?? null;
+}
+
+export const nextTrack = () => spotify('/me/player/next', { method: 'POST' });
+
+// Aggiunge ai Brani che ti piacciono. Dal 2026 si usa /me/library con gli URI; se non va, il modo vecchio.
+export async function saveToLibrary(uris) {
+  try {
+    await spotify('/me/library', { method: 'PUT', query: { uris: uris.join(',') } });
+  } catch (e) {
+    if (e.status !== 404 && e.status !== 400 && e.status !== 403) throw e;
+    await spotify('/me/tracks', { method: 'PUT', query: { ids: uris.map((u) => u.split(':').pop()).join(',') } });
+  }
 }

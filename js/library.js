@@ -1,6 +1,6 @@
 // Raccolta dei brani su cui fare il casuale con criteri, più i dati per filtrarli:
 // generi degli artisti, brani più ascoltati, ascolti recenti e uno storico che cresce nel tempo.
-import { spotify, getAll, playlistTracksCached } from './api.js?v=5';
+import { spotify, getAll, playlistTracksCached } from './api.js?v=6';
 
 // ---------- Brani ----------
 // Brano "semplice" usato per i filtri.
@@ -11,14 +11,24 @@ function simple(t) {
     artists: (t.artists || []).map((a) => ({ id: a.id, name: a.name })),
     year: Number(String(t.album?.release_date || '').slice(0, 4)) || null,
     image: t.album?.images?.at(-1)?.url || '',
+    explicit: !!t.explicit,
+    ms: t.duration_ms || 0,
+    added: Date.parse(t.added_at) || 0,               // quando l'hai messo nella playlist
+    popularity: typeof t.popularity === 'number' ? t.popularity : null,
   };
 }
 
 let likedPromise = null;
+let likedSet = null; // null = non ancora letti
+export const isLiked = (uri) => !!likedSet?.has(uri);
+export const likedKnown = () => !!likedSet;
+export const markLiked = (uri) => likedSet?.add(uri);
 export function likedTracks() {
   if (!likedPromise) {
     likedPromise = getAll('/me/tracks')
-      .then((rows) => rows.map((r) => r.item ?? r.track).filter((t) => t?.uri && !t.is_local))
+      .then((rows) => rows.map((r) => { const t = r.item ?? r.track; return t && { ...t, added_at: r.added_at }; })
+        .filter((t) => t?.uri && !t.is_local))
+      .then((list) => { likedSet = new Set(list.map((t) => t.uri)); return list; })
       .catch((e) => { likedPromise = null; throw e; });
   }
   return likedPromise;
@@ -31,7 +41,12 @@ export async function buildPool(playlists, { liked = false } = {}) {
     liked ? likedTracks() : [],
   ]);
   const byUri = new Map();
-  for (const t of lists.flat()) if (t?.uri && !byUri.has(t.uri)) byUri.set(t.uri, simple(t));
+  for (const t of lists.flat()) {
+    if (!t?.uri) continue;
+    const s = byUri.get(t.uri);
+    if (!s) byUri.set(t.uri, simple(t));
+    else s.added = Math.max(s.added, Date.parse(t.added_at) || 0);
+  }
   return [...byUri.values()];
 }
 
