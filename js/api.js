@@ -1,5 +1,5 @@
 // Chiamate alla Web API di Spotify, con rinnovo automatico dell'accesso e attesa sui limiti.
-import { getAccessToken, refresh } from './auth.js?v=6';
+import { getAccessToken, refresh } from './auth.js?v=7';
 
 const BASE = 'https://api.spotify.com/v1';
 

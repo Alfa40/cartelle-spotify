@@ -1,6 +1,6 @@
 // Raccolta dei brani su cui fare il casuale con criteri, più i dati per filtrarli:
 // generi degli artisti, brani più ascoltati, ascolti recenti e uno storico che cresce nel tempo.
-import { spotify, getAll, playlistTracksCached } from './api.js?v=6';
+import { spotify, getAll, playlistTracksCached } from './api.js?v=7';
 
 // ---------- Brani ----------
 // Brano "semplice" usato per i filtri.

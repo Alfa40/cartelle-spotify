@@ -1,10 +1,10 @@
-import * as auth from './auth.js?v=6';
-import * as api from './api.js?v=6';
-import * as folders from './folders.js?v=6';
-import * as lib from './library.js?v=6';
-import * as crit from './criteria.js?v=6';
-import * as catalog from './catalog.js?v=6';
-import * as tags from './tags.js?v=6';
+import * as auth from './auth.js?v=7';
+import * as api from './api.js?v=7';
+import * as folders from './folders.js?v=7';
+import * as lib from './library.js?v=7';
+import * as crit from './criteria.js?v=7';
+import * as catalog from './catalog.js?v=7';
+import * as tags from './tags.js?v=7';
 
 const app = document.getElementById('app');
 const btnLogout = document.getElementById('btn-logout');
@@ -139,6 +139,8 @@ const cover = (images, cls = 'cover') => images?.length
   : `<div class="${cls}"></div>`;
 const plSub = (p) => `${api.trackCount(p)} brani${isMine(p) ? '' : ' · di ' + esc(p.owner?.display_name || 'altri')}`;
 const nPlaylist = (n) => `${n} playlist`;
+// Colore pastello sempre uguale per lo stesso nome.
+const hue = (s) => [...String(s)].reduce((h, ch) => (h * 31 + ch.codePointAt(0)) % 360, 7);
 
 async function loadAccount() {
   app.innerHTML = '<p class="muted center">Leggo il tuo account…</p>';
@@ -265,19 +267,33 @@ function showHome() {
   btnLogout.hidden = false;
   const { profile, playlists } = state;
   const all = folders.list();
+  const hour = new Date().getHours();
+  const hi = hour < 6 ? 'Buonanotte' : hour < 13 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera';
+  const firstName = String(profile.display_name || profile.id).split(' ')[0];
+  const mixes = crit.moods();
   app.innerHTML = `
-    <section class="card profile slim">
-      ${profile.images?.[0]?.url ? `<img src="${esc(profile.images[0].url)}" alt="">` : '<div class="avatar"></div>'}
-      <div><b>${esc(profile.display_name || profile.id)}</b> <span class="muted small-text">· collegato a Spotify ✓</span></div>
+    <section class="hello">
+      ${profile.images?.[0]?.url ? `<img src="${esc(profile.images[0].url)}" alt="">` : '<div class="avatar">🎧</div>'}
+      <div>
+        <h2>${hi}, ${esc(firstName)}</h2>
+        <p class="muted small-text online">Collegato a Spotify</p>
+      </div>
     </section>
 
+    <div class="tiles">
+      <button id="btn-criteria" class="tile t1"><span class="ico">🎲</span><b>Casuale</b><small>con i tuoi criteri</small></button>
+      <button id="btn-rate" class="tile t2"><span class="ico">🎧</span><b>Valuta</b><small>il brano in ascolto</small></button>
+      <button id="btn-new" class="tile t3"><span class="ico">📁</span><b>Nuova cartella</b><small>di playlist</small></button>
+      <button id="btn-catalog" class="tile t4"><span class="ico">🎛️</span><b>Remix</b><small>${catalogRun ? 'ricerca in corso…' : 'catalogo da scaricare'}</small></button>
+    </div>
+
     <section class="card">
-      <h3>Cartelle</h3>
+      <div class="card-head"><h3>Cartelle <span class="count">${all.length || ''}</span></h3></div>
       ${all.length ? '' : '<p class="muted small-text">Crea una cartella e mettici le playlist che vuoi: la stessa playlist può stare in più cartelle.</p>'}
       <ul class="list folders">
         ${all.map((f) => `
           <li data-f="${esc(f.id)}" class="tap">
-            <div class="cover folder-ico">📁</div>
+            <div class="cover folder-ico" style="--h:${hue(f.name)}">📁</div>
             <div class="txt">
               <span class="name">${esc(f.name)}</span>
               <span class="muted small-text">${nPlaylist(f.playlists.length)}${f.off.length ? ` · ${f.playlists.length - f.off.length} spuntate` : ''}</span>
@@ -285,31 +301,22 @@ function showHome() {
             <button class="play" data-play-f="${esc(f.id)}" aria-label="Casuale su ${esc(f.name)}">▶</button>
           </li>`).join('')}
       </ul>
-      <button id="btn-new" class="small">+ Nuova cartella</button>
     </section>
 
-    <section class="card">
-      <h3>Casuale con criteri</h3>
+    <section class="card" ${mixes.length ? '' : 'hidden'}>
+      <div class="card-head"><h3>I tuoi mix <span class="count">${mixes.length || ''}</span></h3></div>
       <ul class="list moods">
-        ${crit.moods().map((m) => `
+        ${mixes.map((m) => `
           <li data-m="${esc(m.id)}" class="tap">
-            <div class="cover folder-ico">🎲</div>
+            <div class="cover folder-ico" style="--h:${hue(m.name)}">🎲</div>
             <div class="txt"><span class="name">${esc(m.name)}</span><span class="muted small-text">${esc(describe(m.criteria))}</span></div>
             <button class="play" data-play-m="${esc(m.id)}" aria-label="Fai partire ${esc(m.name)}">▶</button>
           </li>`).join('')}
       </ul>
-      <div class="row"><button id="btn-criteria" class="small">🎲 Scegli i criteri</button>
-      <button id="btn-rate" class="small">🎧 Valuta il brano in ascolto</button></div>
     </section>
 
     <section class="card">
-      <h3>Remix e mashup</h3>
-      <p class="muted small-text">Scopri quanti dei brani che ascolti di più puoi scaricare per la tua libreria da remixare.</p>
-      <button id="btn-catalog" class="small">🎛️ Catalogo per remix${catalogRun ? ' · ricerca in corso…' : ''}</button>
-    </section>
-
-    <section class="card">
-      <h3>Tutte le playlist (${playlists.length})</h3>
+      <div class="card-head"><h3>Le tue playlist <span class="count">${playlists.length}</span></h3></div>
       <ul class="list playlists">
         ${playlists.map((p, i) => `
           <li data-i="${i}" class="tap">
@@ -636,7 +643,7 @@ async function showCriteria(moodId) {
     </section>
     <div id="crit-body"><p class="muted center">Carico i tuoi brani…</p></div>
     <div class="bottom-bar">
-      <button id="btn-save" class="ghost">💾 Salva mix</button>
+      <button id="btn-save" class="ghost">💾 Salva</button>
       <button id="btn-go" class="primary" disabled>▶ Fai partire</button>
     </div>`;
   window.scrollTo(0, 0);
@@ -748,7 +755,8 @@ async function showCriteria(moodId) {
     const go = document.getElementById('btn-go');
     go.disabled = !n;
     const shown = crit.pick(crit.filter(pool, c), c, MAX_MIX).length;
-    go.textContent = n ? `▶ Fai partire (${shown < n ? `${shown} di ` : ''}${n} ${n === 1 ? 'brano' : 'brani'})` : 'Nessun brano corrisponde';
+    go.textContent = n ? `▶ Ascolta ${shown} ${shown === 1 ? 'brano' : 'brani'}` : 'Nessun brano';
+    go.title = shown < n ? `${shown} scelti a caso tra ${n}` : '';
   };
 
   const refresh = (only) => {
@@ -1124,6 +1132,9 @@ function fmtTime(ms) {
 
 function route() {
   const h = location.hash;
+  app.classList.remove('enter');
+  void app.offsetWidth; // riavvia l'animazione
+  app.classList.add('enter');
   let m;
   if ((m = h.match(/^#\/playlist\/(\w+)/))) showPlaylist(m[1]);
   else if ((m = h.match(/^#\/cartella\/(\w+)/))) showFolder(m[1]);
