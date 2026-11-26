@@ -83,8 +83,8 @@ body {
 }
 .top h1 { font-size: 1.15rem; font-weight: 900; margin: 0; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
 .top h1::before {
-  content: '📁'; display: grid; place-items: center; width: 34px; height: 34px; font-size: 1.05rem;
-  border-radius: 11px; background: var(--accent-soft);
+  content: ''; width: 36px; height: 36px; border-radius: 11px;
+  background: url('../icons/icon-192.png?v=2') center / cover; box-shadow: 0 2px 0 rgba(0, 0, 0, .12);
 }
 .top .link { text-decoration: none; background: var(--surface); box-shadow: var(--shadow); padding: 6px 14px; min-height: 36px; color: var(--muted); font-weight: 700; }
 
