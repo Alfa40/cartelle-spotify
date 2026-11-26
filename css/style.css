@@ -145,3 +145,24 @@ body.no-scroll { overflow: hidden; }
 @keyframes up { from { transform: translateY(30%); } }
 #toast { z-index: 20; }
 body.no-scroll #toast { bottom: auto; top: calc(env(safe-area-inset-top) + 16px); }
+
+/* ---- Casuale con criteri ---- */
+select {
+  font: inherit; color: var(--text); background: var(--card-2);
+  border: 1px solid #3a3a3a; border-radius: 10px; padding: 10px; width: 100%;
+}
+.years { flex-wrap: nowrap; }
+.years label { flex: 1; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.chip.off { background: #4a1f1f; border-color: var(--error); color: #ffd0d0; }
+.chip .muted { font-size: .8em; }
+#crit-body { padding-bottom: 90px; }
+.bottom-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: flex; gap: 8px; padding: 10px 12px calc(env(safe-area-inset-bottom) + 10px);
+  background: linear-gradient(transparent, var(--bg) 30%);
+  max-width: 640px; margin: 0 auto;
+}
+.bottom-bar button { margin-top: 0 !important; }
+.bottom-bar .ghost { flex: 0 0 auto; }
+.bottom-bar .primary { flex: 1; }
+body:has(.bottom-bar) #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
