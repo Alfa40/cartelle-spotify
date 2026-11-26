@@ -1,5 +1,5 @@
 // Chiamate alla Web API di Spotify, con rinnovo automatico dell'accesso e attesa sui limiti.
-import { getAccessToken, refresh } from './auth.js?v=2';
+import { getAccessToken, refresh } from './auth.js?v=3';
 
 const BASE = 'https://api.spotify.com/v1';
 
@@ -79,6 +79,21 @@ export async function playlistTracks(playlistId) {
   return rows
     .map((r) => r.item ?? r.track)
     .filter((t) => t && t.type === 'track' && t.uri && !t.is_local);
+}
+
+// Come playlistTracks, ma ricorda i brani finché la playlist non cambia (snapshot_id).
+const trackCache = new Map();
+export function playlistTracksCached(p) {
+  const key = `${p.id}:${p.snapshot_id}`;
+  if (!trackCache.has(key)) {
+    trackCache.set(key, playlistTracks(p.id).catch((e) => { trackCache.delete(key); throw e; }));
+  }
+  return trackCache.get(key);
+}
+
+// Fa partire un elenco di brani scelto da noi (per il casuale su più playlist).
+export async function playUris(uris, deviceId) {
+  await spotify('/me/player/play', { method: 'PUT', query: { device_id: deviceId }, body: { uris } });
 }
 
 // Fa partire una playlist da un brano preciso.
