@@ -1,5 +1,5 @@
 // Criteri del casuale e "mood" salvati (es. Festa, Relax, Palestra).
-import { genresOf, isFavorite, isForgotten, isRecent } from './library.js?v=4';
+import { genresOf, isFavorite, isForgotten, isRecent } from './library.js?v=5';
 
 // Criteri vuoti = nessun filtro.
 export const empty = () => ({

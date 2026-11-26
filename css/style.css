@@ -166,3 +166,21 @@ select {
 .bottom-bar .ghost { flex: 0 0 auto; }
 .bottom-bar .primary { flex: 1; }
 body:has(.bottom-bar) #toast { bottom: calc(env(safe-area-inset-bottom) + 84px); }
+
+/* ---- Catalogo per remix ---- */
+.progress { height: 10px; background: var(--card-2); border-radius: 99px; overflow: hidden; margin: 8px 0; }
+.progress > div { height: 100%; background: var(--accent); transition: width .4s; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 14px; }
+.stats > div { background: var(--card-2); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; }
+.stats b { font-size: 1.3rem; }
+.stats span { color: var(--muted); font-size: .8rem; }
+table.by-group { width: 100%; border-collapse: collapse; font-size: .9rem; margin-bottom: 10px; }
+table.by-group th { text-align: left; color: var(--muted); font-weight: normal; padding: 4px 0; }
+table.by-group td { padding: 6px 0; border-top: 1px solid #2c2c2c; }
+table.by-group td:last-child, table.by-group th:last-child { text-align: right; white-space: nowrap; }
+details { margin: 8px 0; }
+summary { cursor: pointer; padding: 8px 0; color: var(--accent); }
+.list.plain li { gap: 8px; }
+.list.plain .chip { min-height: 32px; padding: 4px 10px; font-size: .85rem; text-decoration: none; color: var(--text); display: inline-flex; align-items: center; flex: none; }
+.pick-groups .check { padding: 4px 0; }
+.chip { border-radius: 999px; }

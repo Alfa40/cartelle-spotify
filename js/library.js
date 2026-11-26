@@ -1,6 +1,6 @@
 // Raccolta dei brani su cui fare il casuale con criteri, più i dati per filtrarli:
 // generi degli artisti, brani più ascoltati, ascolti recenti e uno storico che cresce nel tempo.
-import { spotify, getAll, playlistTracksCached } from './api.js?v=4';
+import { spotify, getAll, playlistTracksCached } from './api.js?v=5';
 
 // ---------- Brani ----------
 // Brano "semplice" usato per i filtri.
@@ -86,15 +86,24 @@ const HKEY = 'sp_history';
 const readHistory = () => { try { return JSON.parse(localStorage.getItem(HKEY)) || { last: 0, tracks: {} }; } catch { return { last: 0, tracks: {} }; } };
 
 let recentUris = new Set();
+let recentTracks = [];          // brani completi degli ultimi ascolti
+let recentFrom = new Map();      // id playlist -> quanti ultimi ascolti sono partiti da lì
 export async function syncHistory() {
   const h = readHistory();
   const data = await spotify('/me/player/recently-played', { query: { limit: 50 } });
   recentUris = new Set();
+  recentTracks = [];
+  recentFrom = new Map();
   let newest = h.last;
   for (const it of data?.items || []) {
     const uri = it.track?.uri ?? it.item?.uri;
     if (!uri) continue;
     recentUris.add(uri);
+    if (it.track ?? it.item) recentTracks.push(it.track ?? it.item);
+    if (it.context?.type === 'playlist') {
+      const pid = it.context.uri.split(':').pop();
+      recentFrom.set(pid, (recentFrom.get(pid) || 0) + 1);
+    }
     const at = Date.parse(it.played_at);
     if (at <= h.last) continue; // già contato
     const rec = (h.tracks[uri] ??= { n: 0, at: 0 });
@@ -108,6 +117,8 @@ export async function syncHistory() {
 
 export const historyOf = (uri) => readHistory().tracks[uri];
 export const isRecent = (uri) => recentUris.has(uri);
+export const recentList = () => recentTracks;
+export const playsFrom = (playlistId) => recentFrom.get(playlistId) || 0;
 
 // Brani più ascoltati secondo Spotify: ultimo mese, ultimi 6 mesi, ultimo anno circa.
 let top = null;
@@ -115,8 +126,12 @@ export async function loadTop() {
   if (top) return top;
   const terms = ['short_term', 'medium_term', 'long_term'];
   const res = await Promise.all(terms.map((t) => spotify('/me/top/tracks', { query: { time_range: t, limit: 50 } }).catch(() => null)));
-  top = {};
-  terms.forEach((t, i) => { top[t] = new Set((res[i]?.items || []).map((x) => x.uri)); });
+
+  top = { items: {} };
+  terms.forEach((t, i) => {
+    top.items[t] = res[i]?.items || [];
+    top[t] = new Set(top.items[t].map((x) => x.uri));
+  });
   return top;
 }
 

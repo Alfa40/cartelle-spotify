@@ -1,8 +1,9 @@
-import * as auth from './auth.js?v=4';
-import * as api from './api.js?v=4';
-import * as folders from './folders.js?v=4';
-import * as lib from './library.js?v=4';
-import * as crit from './criteria.js?v=4';
+import * as auth from './auth.js?v=5';
+import * as api from './api.js?v=5';
+import * as folders from './folders.js?v=5';
+import * as lib from './library.js?v=5';
+import * as crit from './criteria.js?v=5';
+import * as catalog from './catalog.js?v=5';
 
 const app = document.getElementById('app');
 const btnLogout = document.getElementById('btn-logout');
@@ -300,6 +301,12 @@ function showHome() {
     </section>
 
     <section class="card">
+      <h3>Remix e mashup</h3>
+      <p class="muted small-text">Scopri quanti dei brani che ascolti di più puoi scaricare per la tua libreria da remixare.</p>
+      <button id="btn-catalog" class="small">🎛️ Catalogo per remix${catalogRun ? ' · ricerca in corso…' : ''}</button>
+    </section>
+
+    <section class="card">
       <h3>Tutte le playlist (${playlists.length})</h3>
       <ul class="list playlists">
         ${playlists.map((p, i) => `
@@ -312,6 +319,7 @@ function showHome() {
     </section>`;
 
   document.getElementById('btn-criteria').onclick = () => { location.hash = '#/casuale'; };
+  document.getElementById('btn-catalog').onclick = () => { location.hash = '#/catalogo'; };
   app.querySelector('.moods').addEventListener('click', (ev) => {
     const btn = ev.target.closest('[data-play-m]');
     if (btn) { playMood(crit.moods().find((m) => m.id === btn.dataset.playM)); return; }
@@ -741,6 +749,180 @@ async function showCriteria(moodId) {
   load();
 }
 
+// ---------- Catalogo per remix e mashup ----------
+let catalogRun = null; // ricerca in corso: { stop: bool }
+
+async function showCatalog() {
+  btnLogout.hidden = false;
+  const here = location.hash;
+  app.innerHTML = `
+    <button class="link back" onclick="location.hash=''">← Home</button>
+    <section class="card">
+      <h2>🎛️ Catalogo per remix</h2>
+      <p class="muted small-text">Controllo quali dei brani che ascolti di più si possono <b>comprare e scaricare</b> su iTunes Italia, per creare la tua libreria personale da remixare. A iTunes mando solo artista e titolo.</p>
+    </section>
+    <div id="cat-body"><p class="muted center">Guardo cosa hai ascoltato ultimamente…</p></div>`;
+  window.scrollTo(0, 0);
+  const body = document.getElementById('cat-body');
+
+  // 1. Ascolti e brani più ascoltati
+  let top;
+  try {
+    await loadListening();
+    top = await lib.loadTop();
+  } catch (e) {
+    body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i tuoi ascolti: ${esc(e.message)}</p></section>`;
+    return;
+  }
+  const topRecent = new Set([...top.short_term, ...top.medium_term]);
+
+  // 2. Punteggio "ascoltata ultimamente" di ogni playlist tua: 5 punti per ogni ultimo ascolto
+  //    partito da lì, 1 punto per ogni suo brano tra i tuoi più ascoltati dell'ultimo periodo.
+  const mine = state.playlists.filter(isMine);
+  const plTracks = new Map();
+  let done = 0;
+  await Promise.all(mine.map(async (p) => {
+    try { plTracks.set(p.id, await api.playlistTracksCached(p)); } catch { plTracks.set(p.id, []); }
+    done++;
+    if (stillOn()) body.innerHTML = `<p class="muted center">Leggo le tue playlist: ${done} di ${mine.length}…</p>`;
+  }));
+  function stillOn() { return location.hash === here; }
+  if (!stillOn()) return;
+
+  const plScore = (p) => 5 * lib.playsFrom(p.id) + (plTracks.get(p.id) || []).filter((t) => topRecent.has(t.uri)).length;
+
+  // Gruppi tra cui scegliere
+  const groups = [];
+  const topTracks = [...top.items.short_term, ...top.items.medium_term];
+  groups.push({ key: 'top', label: '⭐ I tuoi più ascoltati (ultimo mese e ultimi 6 mesi)', tracks: topTracks, on: true, score: 99 });
+  groups.push({ key: 'recent', label: '🕑 I tuoi ultimi 50 ascolti', tracks: lib.recentList(), on: true, score: 98 });
+  const inFolders = new Set();
+  for (const f of folders.list()) {
+    const pls = f.playlists.map(byId).filter((p) => p && isMine(p));
+    pls.forEach((p) => inFolders.add(p.id));
+    const score = pls.reduce((s, p) => s + plScore(p), 0);
+    groups.push({ key: 'f:' + f.id, label: `📁 ${f.name}`, tracks: pls.flatMap((p) => plTracks.get(p.id) || []), on: score > 0, score, folder: true });
+  }
+  const others = mine.filter((p) => !inFolders.has(p.id) && plScore(p) > 0).sort((a, b) => plScore(b) - plScore(a));
+  for (const p of others) {
+    groups.push({ key: 'p:' + p.id, label: `🎵 ${p.name}`, tracks: plTracks.get(p.id) || [], on: true, score: plScore(p) });
+  }
+  groups.sort((a, b) => b.score - a.score);
+
+  const stars = (s) => (s >= 98 ? '' : s >= 20 ? ' · ascoltata molto di recente' : s >= 5 ? ' · ascoltata di recente' : s > 0 ? ' · ascoltata un po\'' : ' · non ascoltata di recente');
+
+  const selection = () => {
+    const rows = new Map();
+    for (const g of groups.filter((x) => x.on)) {
+      for (const t of g.tracks) {
+        if (!t?.uri || t.is_local) continue;
+        const r = rows.get(t.uri) || { t, sources: [] };
+        r.sources.push(g.label.replace(/^\S+\s/, ''));
+        rows.set(t.uri, r);
+      }
+    }
+    return [...rows.values()];
+  };
+
+  const render = () => {
+    const rows = selection();
+    const todo = rows.filter((r) => !catalog.isChecked(r.t.uri));
+    const checked = rows.filter((r) => catalog.isChecked(r.t.uri));
+    const found = checked.filter((r) => catalog.resultOf(r.t.uri).found);
+    const priced = found.filter((r) => catalog.resultOf(r.t.uri).price);
+    const cost = priced.reduce((s, r) => s + catalog.resultOf(r.t.uri).price, 0);
+    const minutes = Math.ceil((todo.length * catalog.PAUSE_MS) / 60000);
+    const running = !!catalogRun;
+    const euro = (n) => n.toFixed(2).replace('.', ',') + ' €';
+    const line = (r) => {
+      const res = catalog.resultOf(r.t.uri);
+      const who = esc((r.t.artists || []).map((a) => a.name).join(', '));
+      return `<li><span class="txt"><span class="name">${esc(r.t.name)}</span><span class="muted small-text">${who}${res?.price ? ' · ' + euro(res.price) : ''}${res?.variant ? ' · c’è solo una versione live/remix' : res?.found && !res.sameLength ? ' · durata diversa, da verificare' : ''}</span></span>
+        ${res?.url ? `<a class="chip" href="${esc(res.url)}" target="_blank" rel="noopener">iTunes ↗</a>` : ''}</li>`;
+    };
+
+    body.innerHTML = `
+      <section class="card">
+        <h3>Da dove prendo i brani</h3>
+        <p class="muted small-text">Ho messo in ordine le cartelle e le playlist da quelle che hai ascoltato di più ultimamente.</p>
+        <ul class="list pick-groups">
+          ${groups.map((g, i) => `
+            <li><label class="check">
+              <input type="checkbox" data-g="${i}" ${g.on ? 'checked' : ''} ${running ? 'disabled' : ''}>
+              <span class="txt"><span class="name">${esc(g.label)}</span>
+              <span class="muted small-text">${new Set(g.tracks.map((t) => t?.uri)).size} brani${stars(g.score)}</span></span>
+            </label></li>`).join('')}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h3>Ricerca su iTunes</h3>
+        <p><b>${rows.length}</b> brani scelti · <b>${checked.length}</b> già controllati · <b>${todo.length}</b> da controllare</p>
+        ${running ? `
+          <div class="progress"><div style="width:${rows.length ? (100 * checked.length) / rows.length : 0}%"></div></div>
+          <p class="muted small-text">Tieni l'app aperta e lo schermo acceso. Se la chiudi, la prossima volta riparto da dove ero arrivato.</p>
+          <button id="btn-stop" class="ghost">Ferma</button>`
+        : todo.length ? `<button id="btn-run" class="primary">🔎 Controlla ${todo.length} brani (circa ${minutes} min)</button>` : ''}
+      </section>
+
+      ${checked.length ? `
+      <section class="card">
+        <h3>Risultato${todo.length ? ' (parziale)' : ''}</h3>
+        <div class="stats">
+          <div><b>${found.length}</b><span>su ${checked.length} trovati</span></div>
+          <div><b>${checked.length ? Math.round((100 * found.length) / checked.length) : 0}%</b><span>scaricabili</span></div>
+          <div><b>${euro(cost)}</b><span>per comprarli tutti</span></div>
+        </div>
+        <table class="by-group">
+          <tr><th>Da dove</th><th>Trovati</th></tr>
+          ${groups.filter((g) => g.on).map((g) => {
+            const uris = [...new Set(g.tracks.map((t) => t?.uri).filter(Boolean))].filter((u) => catalog.isChecked(u));
+            const f = uris.filter((u) => catalog.resultOf(u).found).length;
+            return `<tr><td>${esc(g.label)}</td><td>${f} / ${uris.length}</td></tr>`;
+          }).join('')}
+        </table>
+        <details><summary>Non trovati (${checked.length - found.length})</summary><ul class="list plain">${checked.filter((r) => !catalog.resultOf(r.t.uri).found).map(line).join('')}</ul></details>
+        <details><summary>Trovati (${found.length})</summary><ul class="list plain">${found.map(line).join('')}</ul></details>
+        <button id="btn-csv" class="small">📄 Scarica l'elenco (Excel)</button>
+      </section>` : ''}`;
+
+    body.querySelectorAll('input[data-g]').forEach((cb) => {
+      cb.onchange = () => { groups[cb.dataset.g].on = cb.checked; render(); };
+    });
+    document.getElementById('btn-stop')?.addEventListener('click', () => { if (catalogRun) catalogRun.stop = true; });
+    document.getElementById('btn-csv')?.addEventListener('click', () => {
+      const blob = new Blob([catalog.csv(rows)], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `catalogo-remix-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+    document.getElementById('btn-run')?.addEventListener('click', () => run(todo));
+  };
+
+  const run = async (todo) => {
+    const job = { stop: false, redraw: render };
+    catalogRun = job;
+    let lock = null;
+    try { lock = await navigator.wakeLock?.request('screen'); } catch { /* non supportato */ }
+    render();
+    let lastDraw = 0;
+    for (const r of todo) {
+      if (job.stop) break;
+      await catalog.check(r.t);
+      if (location.hash === '#/catalogo' && Date.now() - lastDraw > 1500) { lastDraw = Date.now(); job.redraw(); }
+      await new Promise((res) => setTimeout(res, catalog.PAUSE_MS));
+    }
+    catalogRun = null;
+    lock?.release?.().catch(() => {});
+    if (location.hash === '#/catalogo') { job.redraw(); toast(job.stop ? 'Ricerca fermata: riprendi quando vuoi' : 'Ricerca finita ✓'); }
+  };
+
+  if (catalogRun) catalogRun.redraw = render; // ricerca partita prima: questa pagina mostra il suo avanzamento
+  render();
+}
+
 function fmtTime(ms) {
   const s = Math.round((ms || 0) / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -752,6 +934,7 @@ function route() {
   if ((m = h.match(/^#\/playlist\/(\w+)/))) showPlaylist(m[1]);
   else if ((m = h.match(/^#\/cartella\/(\w+)/))) showFolder(m[1]);
   else if ((m = h.match(/^#\/casuale(?:\/(\w+))?$/))) showCriteria(m[1]);
+  else if (h === '#/catalogo') showCatalog();
   else showHome();
 }
 
