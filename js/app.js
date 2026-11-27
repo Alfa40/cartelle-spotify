@@ -1,11 +1,12 @@
-import * as auth from './auth.js?v=12';
-import * as api from './api.js?v=12';
-import * as folders from './folders.js?v=12';
-import * as lib from './library.js?v=12';
-import * as crit from './criteria.js?v=12';
-import * as catalog from './catalog.js?v=12';
-import * as tags from './tags.js?v=12';
-import { ICONS } from './icons.js?v=12';
+import * as auth from './auth.js?v=13';
+import * as api from './api.js?v=13';
+import * as folders from './folders.js?v=13';
+import * as lib from './library.js?v=13';
+import * as crit from './criteria.js?v=13';
+import * as catalog from './catalog.js?v=13';
+import * as tags from './tags.js?v=13';
+import { ICONS } from './icons.js?v=13';
+import * as dj from './dj.js?v=13';
 
 const app = document.getElementById('app');
 const showError = (msg) => toast(`Errore: ${msg}`, 8000);
@@ -296,7 +297,7 @@ function showHome() {
       <button id="btn-criteria" class="tile t1"><span class="ico">${ICONS.dice}</span><b>Casuale con filtri</b><small>anni, generi, mood…</small></button>
       <button id="btn-rate" class="tile t2"><span class="ico">${ICONS.headphones}</span><b>Valuta</b><small>il brano in ascolto</small></button>
       <button id="btn-new" class="tile t3"><span class="ico">${ICONS.folderPlus}</span><b>Nuova cartella</b><small>di playlist</small></button>
-      <button id="btn-catalog" class="tile t4"><span class="ico">${ICONS.deck}</span><b>Remix</b><small>${catalogRun ? 'ricerca in corso…' : 'catalogo da scaricare'}</small></button>
+      <button id="btn-catalog" class="tile t4"><span class="ico">${ICONS.deck}</span><b>DJ AI</b><small>${catalogRun ? 'ricerca in corso…' : 'remix e mashup'}</small></button>
     </div>
 
     <section class="card">
@@ -342,7 +343,7 @@ function showHome() {
   document.getElementById('btn-criteria').onclick = () => { location.hash = '#/casuale'; };
   app.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => { location.hash = b.dataset.go; }; });
   document.getElementById('btn-rate').onclick = () => rateNowPlaying();
-  document.getElementById('btn-catalog').onclick = () => { location.hash = '#/catalogo'; };
+  document.getElementById('btn-catalog').onclick = () => { location.hash = '#/remix'; };
   app.querySelector('.moods').addEventListener('click', (ev) => {
     const btn = ev.target.closest('[data-play-m]');
     if (btn) { playMood(crit.moods().find((m) => m.id === btn.dataset.playM)); return; }
@@ -1045,6 +1046,242 @@ async function rateNowPlaying(onSaved) {
   });
 }
 
+// ---------- DJ AI: I miei remix ----------
+const STATI = {
+  'in attesa del PC': ['⏳', 'Aspetta che accendi il PC'], 'in coda': ['⏳', 'In coda sul PC'],
+  'in lavorazione': ['⚙️', 'Il PC ci sta lavorando…'], fatto: ['✅', 'Pronto'], manca: ['🛒', 'Brano da comprare'], errore: ['⚠️', 'Errore'],
+};
+const durata = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+const nomeBrano = (b) => (typeof b === 'string'
+  ? (dj.cached.brani().find((x) => x.id === b)?.titolo || b)
+  : `${b.titolo}${b.artisti?.length ? ' – ' + b.artisti.join(', ') : ''}`);
+
+let djPlayer = null; // { file, url }
+
+function showDjSetup() {
+  app.innerHTML = `
+    <button class="link back" onclick="location.hash=''">← Home</button>
+    <section class="card">
+      <h2>🎛️ DJ AI</h2>
+      <p class="muted">Per collegare l'app al PC di casa serve una chiave di GitHub che vede solo la cartella privata delle richieste. Si fa una volta sola:</p>
+      <ol class="steps">
+        <li>Apri <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com → nuova chiave (fine-grained)</a> ed entra con l'account <b>Alfa40</b>.</li>
+        <li><b>Token name</b>: Cartelle. <b>Expiration</b>: la più lunga possibile.</li>
+        <li><b>Repository access</b>: <i>Only select repositories</i> → scegli <b>dj-coda</b>.</li>
+        <li><b>Permissions</b> → <b>Repository permissions</b> → <b>Contents</b>: <i>Read and write</i>.</li>
+        <li>Premi <b>Generate token</b>, copia la chiave (inizia con <code>github_pat_</code>) e incollala qui.</li>
+      </ol>
+      <label for="dj-token">Chiave GitHub</label>
+      <input id="dj-token" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      <button id="dj-save" class="primary">Collega</button>
+      <p class="muted small-text">Sull'iPhone deve essere acceso Tailscale per parlare col PC. Anche senza, le richieste partono e il PC le fa quando si accende.</p>
+    </section>`;
+  document.getElementById('dj-save').onclick = async () => {
+    const v = document.getElementById('dj-token').value.trim();
+    if (!v) return;
+    toast('Controllo la chiave…', 8000);
+    try { await dj.setToken(v); toast('Collegato ✓'); showRemix(); } catch (e) { toast(`Non va: ${e.message}`, 6000); }
+  };
+}
+
+async function showRemix() {
+  btnLogout.hidden = false;
+  if (!dj.configured()) { showDjSetup(); return; }
+  const here = location.hash;
+  const req = { preset: dj.cached.preset()[0]?.id || 'sporca', brano: null, con: null, nota: '' };
+  let online = null, saved = new Set(), lastPresets = JSON.stringify(dj.cached.preset());
+
+  app.innerHTML = `<div id="dj-root">
+    <button class="link back" onclick="location.hash=''">← Home</button>
+    <section class="card">
+      <div class="card-head"><h2>🎛️ DJ AI</h2><span id="dj-pc" class="pill">…</span></div>
+      <p class="muted small-text">Scegli cosa fare e su quale brano: il PC di casa prepara il remix e lo trovi qui sotto.</p>
+    </section>
+    <section class="card" id="dj-new"></section>
+    <section class="card" id="dj-wait" hidden></section>
+    <section class="card" id="dj-list"></section>
+    <section class="card">
+      <h3>Altro</h3>
+      <div class="row">
+        <button class="small" onclick="location.hash='#/catalogo'">🛒 Quali brani posso comprare</button>
+        <button class="small" id="dj-forget">Scollega</button>
+      </div>
+    </section>
+    <div id="dj-player" class="dj-player" hidden></div></div>`;
+  window.scrollTo(0, 0);
+  const root = document.getElementById('dj-root');
+  const stillHere = () => location.hash === here;
+
+  const presetOf = (id) => dj.cached.preset().find((p) => p.id === id) || { id, nome: id, tipo: '' };
+
+  const drawNew = () => {
+    const p = presetOf(req.preset);
+    const isMash = p.tipo === 'mashup';
+    document.getElementById('dj-new').innerHTML = `
+      <h3>Nuovo remix</h3>
+      <h4>Cosa faccio</h4>
+      <div class="chips" id="dj-presets">${dj.cached.preset().map((x) =>
+        `<button class="chip ${x.id === req.preset ? 'on' : ''}" data-p="${esc(x.id)}">${esc(x.nome)}</button>`).join('')}</div>
+      ${p.descrizione ? `<p class="muted small-text">${esc(p.descrizione)}</p>` : ''}
+      <h4>${isMash ? 'Voce da' : 'Brano'}</h4>
+      <button class="pick-song ${req.brano ? 'set' : ''}" data-pick="brano">${req.brano ? '🎵 ' + esc(nomeBrano(req.brano)) : '+ Scegli il brano'}</button>
+      ${isMash ? `<h4>Base da</h4>
+      <button class="pick-song ${req.con ? 'set' : ''}" data-pick="con">${req.con ? '🎵 ' + esc(nomeBrano(req.con)) : '+ Scegli il brano per la base'}</button>` : ''}
+      <h4>Indicazioni (facoltativo)</h4>
+      <textarea id="dj-nota" rows="2" placeholder="es. più cattivo, bassi pesanti, voce più alta">${esc(req.nota)}</textarea>
+      <button id="dj-send" class="primary" ${req.brano && (!isMash || req.con) ? '' : 'disabled'}>✨ Chiedi il remix</button>`;
+    document.getElementById('dj-nota').oninput = (e) => { req.nota = e.target.value; };
+  };
+
+  const drawWait = () => {
+    const list = dj.cached.attesa().filter((a) => a.stato !== 'fatto' || Date.now() - Date.parse(a.creata) < 6 * 3600e3);
+    const box = document.getElementById('dj-wait');
+    box.hidden = !list.length;
+    box.innerHTML = `<h3>Richieste</h3><ul class="list">${list.map((a) => {
+      const [ico, txt] = STATI[a.stato] || ['•', a.stato];
+      return `<li><div class="cover folder-ico" style="--h:${hue(a.preset)}">${ico}</div>
+        <div class="txt"><span class="name">${esc(presetOf(a.preset).nome)} · ${esc(nomeBrano(a.brano))}${a.con ? ' × ' + esc(nomeBrano(a.con)) : ''}</span>
+        <span class="muted small-text">${esc(txt)}${a.messaggio ? ' — ' + esc(a.messaggio) : ''}</span></div>
+        ${['fatto', 'manca', 'errore'].includes(a.stato) ? `<button class="link" data-dismiss="${esc(a.id)}" aria-label="Togli">✕</button>` : ''}</li>`;
+    }).join('')}</ul>`;
+  };
+
+  const drawList = () => {
+    const rem = dj.cached.remix();
+    document.getElementById('dj-list').innerHTML = `
+      <div class="card-head"><h3>I miei remix <span class="count">${rem.length || ''}</span></h3></div>
+      ${rem.length ? '' : '<p class="muted small-text">Ancora niente: chiedi il primo remix qui sopra.</p>'}
+      <ul class="list">${rem.map((v) => `
+        <li class="tap" data-file="${esc(v.file)}">
+          <div class="cover folder-ico" style="--h:${hue(v.preset)}">${djPlayer?.file === v.file ? '🔊' : '🎧'}</div>
+          <div class="txt"><span class="name">${esc(v.titolo)}</span>
+            <span class="muted small-text">${durata(v.durata)} · ${saved.has(v.file) ? '📱 sul telefono' : online ? 'sul PC' : 'sul PC (spento)'}</span></div>
+          <button class="play" data-play-file="${esc(v.file)}" aria-label="Ascolta">▶</button>
+        </li>`).join('')}</ul>`;
+  };
+
+  const drawPc = () => {
+    const el = document.getElementById('dj-pc');
+    el.textContent = online == null ? 'controllo il PC…' : online ? '🟢 PC acceso' : '⚪ PC spento';
+    el.className = `pill ${online ? 'on' : ''}`;
+  };
+
+  const drawAll = () => { drawPc(); drawNew(); drawWait(); drawList(); };
+
+  const play = async (file) => {
+    const v = dj.cached.remix().find((x) => x.file === file);
+    const box = document.getElementById('dj-player');
+    if (!saved.has(file) && !online) { toast('Questo remix è sul PC: accendilo per scaricarlo sul telefono'); return; }
+    box.hidden = false;
+    box.innerHTML = `<b>${esc(v?.titolo || '')}</b><span class="muted small-text">${saved.has(file) ? '' : 'Scarico sul telefono…'}</span>`;
+    try {
+      const url = await dj.audioUrl(file);
+      if (djPlayer?.url) URL.revokeObjectURL(djPlayer.url);
+      djPlayer = { file, url };
+      saved.add(file);
+      box.innerHTML = `<b>${esc(v?.titolo || '')}</b><audio controls autoplay src="${url}"></audio>
+        <p class="muted small-text">Remix privato: solo per te, non condividerlo.</p>`;
+      drawList();
+    } catch (e) {
+      box.innerHTML = `<span class="error">Non riesco a scaricarlo: ${esc(e.message)}</span>`;
+    }
+  };
+
+  // Scelta del brano: dalla libreria del PC o da Spotify.
+  const pickSong = (field) => {
+    const s = sheet(`<h3>Scegli il brano</h3>
+      <input id="dj-q" placeholder="Cerca titolo o artista…" autocomplete="off">
+      <div id="dj-res"></div>
+      <div class="row"><button class="ghost" data-x>Chiudi</button></div>`);
+    const q = s.el.querySelector('#dj-q');
+    const res = s.el.querySelector('#dj-res');
+    let spot = [], timer = null, seq = 0;
+    const draw = () => {
+      const t = q.value.trim().toLowerCase();
+      const lib = dj.cached.brani().filter((b) => !t || `${b.titolo} ${b.artista}`.toLowerCase().includes(t)).slice(0, 30);
+      res.innerHTML = `
+        <h4>Nella libreria del PC (${dj.cached.brani().length})</h4>
+        <ul class="list">${lib.map((b) => `<li class="tap" data-lib="${esc(b.id)}"><div class="cover folder-ico">💿</div>
+          <div class="txt"><span class="name">${esc(b.titolo)}</span><span class="muted small-text">${esc(b.artista)}</span></div></li>`).join('')
+          || '<li class="muted small-text">Nessun brano</li>'}</ul>
+        ${t ? `<h4>Su Spotify</h4>
+        <p class="muted small-text">Se il brano non è ancora nella libreria, il PC lo segna nella lista della spesa.</p>
+        <ul class="list">${spot.map((x, i) => `<li class="tap" data-sp="${i}">${cover(x.album?.images)}
+          <div class="txt"><span class="name">${esc(x.name)}</span><span class="muted small-text">${esc(x.artists.map((a) => a.name).join(', '))}</span></div></li>`).join('')
+          || '<li class="muted small-text">…</li>'}</ul>` : ''}`;
+    };
+    q.addEventListener('input', () => {
+      draw();
+      clearTimeout(timer);
+      const t = q.value.trim();
+      if (!t) return;
+      timer = setTimeout(async () => {
+        const my = ++seq;
+        try {
+          const r = await api.spotify('/search', { query: { q: t, type: 'track', limit: 10, market: 'IT' } });
+          if (my === seq) { spot = r.tracks?.items || []; draw(); }
+        } catch { /* ricerca non disponibile */ }
+      }, 350);
+    });
+    res.addEventListener('click', (ev) => {
+      const li = ev.target.closest('li[data-lib], li[data-sp]');
+      if (!li) return;
+      if (li.dataset.lib) req[field] = li.dataset.lib;
+      else {
+        const x = spot[li.dataset.sp];
+        req[field] = { titolo: x.name, artisti: x.artists.map((a) => a.name), isrc: x.external_ids?.isrc || '', uri: x.uri };
+      }
+      s.close();
+      drawNew();
+    });
+    s.el.querySelector('[data-x]').onclick = s.close;
+    draw();
+    setTimeout(() => q.focus(), 60);
+  };
+
+  root.addEventListener('click', async (ev) => {
+    if (!stillHere()) return;
+    const t = ev.target;
+    const pb = t.closest('[data-p]');
+    if (pb) { req.preset = pb.dataset.p; if (presetOf(req.preset).tipo !== 'mashup') req.con = null; drawNew(); return; }
+    const ps = t.closest('[data-pick]');
+    if (ps) { pickSong(ps.dataset.pick); return; }
+    if (t.closest('#dj-send')) {
+      const btn = t.closest('#dj-send');
+      btn.disabled = true;
+      try {
+        const a = await dj.send({ preset: req.preset, brano: req.brano, con: req.con, nota: req.nota }, online);
+        toast(a.via === 'pc' ? 'Richiesta mandata al PC ✓' : 'Il PC è spento: la richiesta aspetta e parte appena lo accendi ✓', 5000);
+        req.brano = null; req.con = null; req.nota = '';
+        drawNew(); drawWait();
+      } catch (e) { toast(`Non sono riuscito a mandarla: ${e.message}`, 6000); btn.disabled = false; }
+      return;
+    }
+    const d = t.closest('[data-dismiss]');
+    if (d) { dj.dismiss(d.dataset.dismiss); drawWait(); return; }
+    const pf = t.closest('[data-play-file]') || t.closest('li[data-file]');
+    if (pf) { play(pf.dataset.playFile || pf.dataset.file); return; }
+    if (t.closest('#dj-forget') && await confirmSheet('Scollegare il DJ AI da questo telefono? I remix scaricati restano.', 'Scollega')) {
+      dj.forget(); showRemix();
+    }
+  });
+
+  drawAll();
+  saved = await dj.savedFiles().catch(() => new Set());
+  drawList();
+  const poll = async () => {
+    if (!stillHere()) return;
+    online = await dj.refresh().catch(() => false);
+    if (!stillHere()) return;
+    drawPc(); drawWait(); drawList();
+    const pj = JSON.stringify(dj.cached.preset());
+    if (pj !== lastPresets && !document.querySelector('.sheet')) { lastPresets = pj; drawNew(); }
+    const busy = dj.cached.attesa().some((a) => ['in coda', 'in lavorazione'].includes(a.stato));
+    setTimeout(poll, busy ? 5000 : 20000);
+  };
+  poll();
+}
+
 // ---------- Catalogo per remix e mashup ----------
 let catalogRun = null; // ricerca in corso: { stop: bool }
 
@@ -1235,6 +1472,7 @@ function route() {
   else if ((m = h.match(/^#\/casuale\/cartella\/(\w+)$/))) showCriteria(null, `folder:${m[1]}`);
   else if ((m = h.match(/^#\/casuale(?:\/(\w+))?$/))) showCriteria(m[1]);
   else if (h === '#/catalogo') showCatalog();
+  else if (h === '#/remix') showRemix();
   else showHome();
 }
 

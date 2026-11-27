@@ -31,13 +31,17 @@ def _salva_indice(brani: list[dict]) -> None:
 
 def _tag(path: Path) -> dict:
     """Titolo, artista, album, anno e durata letti dal file."""
-    info = {"titolo": path.stem, "artista": "", "album": "", "anno": "", "durata": 0.0}
+    info = {"titolo": path.stem, "artista": "", "album": "", "anno": "", "durata": 0.0, "isrc": ""}
     try:
         import mutagen
         f = mutagen.File(path, easy=True)
         if f is not None:
             g = lambda k: (f.get(k) or [""])[0]
             info.update(titolo=g("title") or path.stem, artista=g("artist"), album=g("album"), anno=str(g("date"))[:4])
+            try:
+                info["isrc"] = g("isrc")
+            except Exception:
+                info["isrc"] = ""
             if f.info and getattr(f.info, "length", None):
                 info["durata"] = round(float(f.info.length), 2)
     except Exception:
