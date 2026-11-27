@@ -1,5 +1,5 @@
 // Chiamate alla Web API di Spotify, con rinnovo automatico dell'accesso e attesa sui limiti.
-import { getAccessToken, refresh } from './auth.js?v=7';
+import { getAccessToken, refresh } from './auth.js?v=11';
 
 const BASE = 'https://api.spotify.com/v1';
 
@@ -17,7 +17,7 @@ export async function spotify(path, { method = 'GET', body, query } = {}) {
   const url = new URL(path.startsWith('http') ? path : BASE + path);
   if (query) for (const [k, v] of Object.entries(query)) if (v != null) url.searchParams.set(k, v);
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const res = await fetch(url, {
       method,
       headers: {
@@ -37,9 +37,10 @@ export async function spotify(path, { method = 'GET', body, query } = {}) {
       if (reason === 'QUOTA_EXCEEDED') {
         throw new SpotifyError(429, 'Limite di richieste a Spotify raggiunto per oggi.', reason);
       }
-      await sleep((Number(res.headers.get('Retry-After')) || 2) * 1000);
+      await sleep(Math.min((Number(res.headers.get('Retry-After')) || 2 ** attempt), 30) * 1000);
       continue;
     }
+    if (res.status >= 500 && attempt < 2) { await sleep(1000 * (attempt + 1)); continue; }
 
     if (!res.ok) {
       const msg = data?.error?.message || `Errore ${res.status}`;
@@ -55,14 +56,31 @@ function safeJson(text) {
 }
 
 // Scorre tutte le pagine di un elenco (playlist, brani...) e restituisce tutti gli elementi.
+// Le pagine dopo la prima si chiedono 3 alla volta (molto più veloce con migliaia di brani).
 export async function getAll(path, query = {}) {
-  const items = [];
-  let next = await spotify(path, { query: { limit: 50, ...query } });
-  while (next) {
-    items.push(...next.items);
-    next = next.next ? await spotify(next.next) : null;
+  const first = await spotify(path, { query: { limit: 50, ...query } });
+  const items = [...(first?.items || [])];
+  if (!first?.next) return items;
+  const total = first.total;
+  if (typeof total !== 'number') {
+    let next = first.next;
+    while (next) { const d = await spotify(next); items.push(...d.items); next = d.next; }
+    return items;
   }
+  const offsets = [];
+  for (let o = 50; o < total; o += 50) offsets.push(o);
+  const pages = await mapLimit(offsets, 3, (offset) => spotify(path, { query: { limit: 50, ...query, offset } }));
+  for (const d of pages) items.push(...(d?.items || []));
   return items;
+}
+
+// Esegue fn su ogni elemento, al massimo `limit` alla volta, e restituisce i risultati in ordine.
+export async function mapLimit(list, limit, fn) {
+  const out = new Array(list.length);
+  let i = 0;
+  const worker = async () => { while (i < list.length) { const k = i++; out[k] = await fn(list[k], k); } };
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, worker));
+  return out;
 }
 
 export const me = () => spotify('/me');

@@ -1,6 +1,6 @@
 // Raccolta dei brani su cui fare il casuale con criteri, più i dati per filtrarli:
 // generi degli artisti, brani più ascoltati, ascolti recenti e uno storico che cresce nel tempo.
-import { spotify, getAll, playlistTracksCached } from './api.js?v=7';
+import { spotify, getAll, playlistTracksCached, mapLimit } from './api.js?v=11';
 
 // ---------- Brani ----------
 // Brano "semplice" usato per i filtri.
@@ -35,11 +35,22 @@ export function likedTracks() {
 }
 
 // Unisce i brani di più playlist (e se richiesto dei Brani che ti piacciono), senza doppioni.
-export async function buildPool(playlists, { liked = false } = {}) {
-  const lists = await Promise.all([
-    ...playlists.map((p) => playlistTracksCached(p)),
-    liked ? likedTracks() : [],
-  ]);
+// Le playlist si leggono 3 alla volta; se una non si legge si salta (pool.failed dice quante).
+// onProgress(fatte, totale) per far vedere a che punto è.
+export async function buildPool(playlists, { liked = false } = {}, onProgress) {
+  const jobs = [...playlists.map((p) => () => playlistTracksCached(p)), ...(liked ? [() => likedTracks()] : [])];
+  let done = 0, failed = 0;
+  onProgress?.(0, jobs.length);
+  const lists = await mapLimit(jobs, 3, async (job) => {
+    let r = [];
+    try { r = await job(); } catch (e) {
+      if (e.reason === 'QUOTA_EXCEEDED') throw e;
+      failed++;
+    }
+    onProgress?.(++done, jobs.length);
+    return r;
+  });
+  if (failed === jobs.length && jobs.length) throw new Error('Spotify non ha dato nessun brano, riprova tra poco');
   const byUri = new Map();
   for (const t of lists.flat()) {
     if (!t?.uri) continue;
@@ -47,7 +58,9 @@ export async function buildPool(playlists, { liked = false } = {}) {
     if (!s) byUri.set(t.uri, simple(t));
     else s.added = Math.max(s.added, Date.parse(t.added_at) || 0);
   }
-  return [...byUri.values()];
+  const pool = [...byUri.values()];
+  pool.failed = failed;
+  return pool;
 }
 
 // ---------- Generi (si chiedono artista per artista e si ricordano sul telefono) ----------

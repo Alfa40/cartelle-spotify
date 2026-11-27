@@ -1,13 +1,16 @@
-import * as auth from './auth.js?v=7';
-import * as api from './api.js?v=7';
-import * as folders from './folders.js?v=7';
-import * as lib from './library.js?v=7';
-import * as crit from './criteria.js?v=7';
-import * as catalog from './catalog.js?v=7';
-import * as tags from './tags.js?v=7';
-import { ICONS } from './icons.js?v=8';
+import * as auth from './auth.js?v=11';
+import * as api from './api.js?v=11';
+import * as folders from './folders.js?v=11';
+import * as lib from './library.js?v=11';
+import * as crit from './criteria.js?v=11';
+import * as catalog from './catalog.js?v=11';
+import * as tags from './tags.js?v=11';
+import { ICONS } from './icons.js?v=11';
 
 const app = document.getElementById('app');
+const showError = (msg) => toast(`Errore: ${msg}`, 8000);
+window.addEventListener('error', (e) => showError(e.message));
+window.addEventListener('unhandledrejection', (e) => showError(e.reason?.message || String(e.reason)));
 const btnLogout = document.getElementById('btn-logout');
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -564,13 +567,13 @@ function describe(c) {
   return p.join(' · ') || 'Tutto in casuale';
 }
 
-function poolFor(source) {
-  if (source === 'liked') return lib.buildPool([], { liked: true });
+function poolFor(source, onProgress) {
+  if (source === 'liked') return lib.buildPool([], { liked: true }, onProgress);
   if (source.startsWith('folder:')) {
     const f = folders.get(source.slice(7));
-    return lib.buildPool((f?.playlists || []).map(byId).filter((p) => p && isMine(p)));
+    return lib.buildPool((f?.playlists || []).map(byId).filter((p) => p && isMine(p)), {}, onProgress);
   }
-  return lib.buildPool(state.playlists.filter(isMine), { liked: true });
+  return lib.buildPool(state.playlists.filter(isMine), { liked: true }, onProgress);
 }
 
 let listenReady = null;
@@ -636,7 +639,7 @@ async function showCriteria(moodId, source) {
   const ctrl = new AbortController();
   window.addEventListener('hashchange', () => ctrl.abort(), { once: true });
 
-  let pool = [], tl = crit.tally([]), genreStatus = '';
+  let pool = [], tl = crit.tally([]), genreStatus = '', loadId = 0;
   const showAll = { genres: false, years: false, fams: false };
 
   app.innerHTML = `
@@ -657,7 +660,7 @@ async function showCriteria(moodId, source) {
     <div id="crit-body"><p class="muted center">Carico i tuoi brani…</p></div>
     <div class="bottom-bar">
       <button id="btn-save" class="ghost">💾 Salva</button>
-      <button id="btn-go" class="primary" disabled>▶ Fai partire</button>
+      <button id="btn-go" class="primary" disabled>▶ Ascolta</button>
     </div>`;
   window.scrollTo(0, 0);
   const body = document.getElementById('crit-body');
@@ -836,17 +839,32 @@ async function showCriteria(moodId, source) {
   };
 
   const load = async () => {
-    body.innerHTML = '<p class="muted center">Carico i tuoi brani…</p>';
+    const myLoad = ++loadId;
+    body.innerHTML = `<section class="card">
+      <h3>Leggo i tuoi brani…</h3>
+      <div class="progress"><div id="load-bar" style="width:3%"></div></div>
+      <p id="load-txt" class="muted small-text">Chiedo a Spotify le tue playlist. La prima volta può volerci un po' se hai tanti brani.</p>
+    </section>`;
     document.getElementById('btn-go').disabled = true;
+    const onProgress = (d, t) => {
+      if (myLoad !== loadId || !stillHere()) return;
+      const bar = document.getElementById('load-bar'), txt = document.getElementById('load-txt');
+      if (bar) bar.style.width = `${Math.max(3, Math.round((d / Math.max(t, 1)) * 100))}%`;
+      if (txt) txt.textContent = `Letti ${d} elenchi di brani su ${t}…`;
+    };
     try {
-      [pool] = await Promise.all([poolFor(c.source), loadListening(), needsLiked(c) ? lib.likedTracks().catch(() => {}) : null]);
+      [pool] = await Promise.all([poolFor(c.source, onProgress), loadListening(), needsLiked(c) ? lib.likedTracks().catch(() => {}) : null]);
+      if (myLoad !== loadId || !stillHere()) return;
+      tl = crit.tally(pool);
+      render();
+      if (pool.failed) toast(`${pool.failed} ${pool.failed === 1 ? 'playlist non si è letta' : 'playlist non si sono lette'}: le salto`);
     } catch (e) {
-      body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i brani: ${esc(e.message)}</p></section>`;
+      if (myLoad !== loadId || !stillHere()) return;
+      body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i brani: ${esc(e.message)}</p>
+        <button class="primary" id="btn-retry">Riprova</button></section>`;
+      document.getElementById('btn-retry').onclick = load;
       return;
     }
-    if (!stillHere()) return;
-    tl = crit.tally(pool);
-    render();
     loadGenres();
   };
 
