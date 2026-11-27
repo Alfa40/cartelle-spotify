@@ -108,14 +108,23 @@ def dissolvi(x: np.ndarray, in_s=0.0, out_s=0.0) -> np.ndarray:
     return x
 
 
-def finalizza(x: np.ndarray, rms_db=-12.0) -> np.ndarray:
+def limitatore(x: np.ndarray, tetto: float = 0.79, anticipo_ms: float = 5.0, rilascio_ms: float = 60.0) -> np.ndarray:
+    """Limitatore "da studio": guarda avanti di qualche millisecondo e abbassa il volume in modo morbido
+    prima dei picchi, invece di deformare l'onda (niente distorsione né click)."""
+    from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
+    x = stereo(x)
+    w = max(3, int(anticipo_ms / 1000 * SR))
+    picchi = maximum_filter1d(np.abs(x).max(axis=0), size=2 * w + 1)
+    g = np.minimum(1.0, tetto / np.maximum(picchi, 1e-9))
+    g = minimum_filter1d(g, size=int(rilascio_ms / 1000 * SR))   # il volume risale piano
+    g = uniform_filter1d(g, size=2 * w + 1)                       # e scende senza scatti
+    y = x * g[None, :]
+    return np.clip(y, -tetto, tetto).astype(np.float32)
+
+
+def finalizza(x: np.ndarray, rms_db=-14.0) -> np.ndarray:
     """Volume finale: compressione leggera, volume medio fisso e limitatore (niente distorsione)."""
-    x = catena(x, Compressor(threshold_db=-14, ratio=2.5, attack_ms=10, release_ms=120))
+    x = catena(x, Compressor(threshold_db=-16, ratio=2.0, attack_ms=10, release_ms=150))
     rms = np.sqrt(np.mean(x ** 2)) + 1e-9
     x = x * (10 ** (rms_db / 20) / rms)
-    # Limitatore morbido: sotto 0,7 non tocca niente, sopra arrotonda e non supera mai 1.
-    a = np.abs(x)
-    soglia = 0.7
-    x = np.where(a > soglia, np.sign(x) * (soglia + (1 - soglia) * np.tanh((a - soglia) / (1 - soglia))), x)
-    picco = np.abs(x).max() + 1e-9
-    return (x * min(1.0, 0.79 / picco)).astype(np.float32)   # margine di -2 dB: la compressione AAC alza un po' i picchi
+    return limitatore(x)

@@ -102,8 +102,19 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
     stem.separa(b)
     gen = p["genere"]
     g = ritmi.GENERI[gen]
-    bpm = float(p.get("bpm") or g["bpm"])
-    r = _velocita_voce(a["bpm"], bpm, g.get("mezzo_tempo", False))
+    if p.get("bpm"):
+        bpm = float(p["bpm"])
+        r = _velocita_voce(a["bpm"], bpm, g.get("mezzo_tempo", False))
+    else:
+        # Si sceglie il BPM della base, dentro l'intervallo del genere, che stira meno la voce
+        # (anche contando la voce a metà o al doppio del tempo).
+        lo, hi = g["intervallo"]
+        prove = []
+        for m in (0.5, 1, 2):
+            e = a["bpm"] * m
+            scelto = min(max(e, lo), hi)
+            prove.append((abs(np.log(scelto / e)), scelto, scelto / e))
+        _, bpm, r = min(prove)
     voce = fx.stira(stem.carica(b, "vocals"), r)
     if p.get("riverbero_voce"):
         voce = fx.riverbero(voce, p["riverbero_voce"], 0.5)
@@ -203,4 +214,4 @@ TIPI = {"velocita": velocita, "edit": edit, "remix": remix, "mashup": mashup}
 
 def fai(p: dict, b: dict, con: dict | None = None) -> np.ndarray:
     y = TIPI[p["tipo"]](p, b, con=con)
-    return fx.finalizza(y, float(p.get("volume_rms_db", -12)))
+    return fx.finalizza(y, float(p.get("volume_rms_db", -14)))
