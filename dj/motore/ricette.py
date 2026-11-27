@@ -97,6 +97,8 @@ def _velocita_voce(bpm_brano: float, bpm_base: float, mezzo: bool) -> float:
     return min(cand, key=lambda r: abs(np.log(r)))
 
 
+ULTIMO_PIANO: list[str] = []
+
 STRUTTURA_CLUB = [
     {"nome": "intro", "battute": 16, "base": "intro", "voce": None},
     {"nome": "break", "battute": 8, "base": "pausa", "voce": "ritornello", "effetto_voce": "filtro"},
@@ -158,13 +160,13 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
     sezioni = []
     for sz in struttura:
         sz = dict(sz)
-        pz = vc.pezzo(dv, sz["voce"]) if sz.get("voce") else None
+        pz = vc.pezzo(dv, sz["voce"], a) if sz.get("voce") else None
         if sz.get("battute") == "voce":
             # "max" e "ripeti" contano le battute del brano originale (le frasi vere del testo).
-            orig = min((pz[1] if pz else 8) * int(sz.get("ripeti", 1)), int(sz.get("max", 10 ** 6)))
-            if pz and orig < pz[1]:
-                pz = (pz[0], orig)
-            sz["battute"] = max(4, int(round(orig * q / 4)) * 4)
+            orig = min((pz["battute"] if pz else 8) * int(sz.get("ripeti", 1)), int(sz.get("max", 10 ** 6)))
+            if pz and orig < pz["battute"]:
+                pz = _accorcia(pz, orig, a)
+            sz["battute"] = max(4, int(np.ceil(round(orig * q / 2, 2))) * 2)
         sz["battute"] = int(sz["battute"])
         sz["pezzo"] = pz
         sezioni.append(sz)
@@ -175,40 +177,40 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
             break
         sezioni.pop(strofe[-1])
 
+    piano = []
+    pos_b = 0
+    for x in sezioni:
+        pz = x["pezzo"]
+        piano.append(f'{x["nome"]}: battute {pos_b}-{pos_b + x["battute"]} ({x["battute"] * bat:.0f} s), base {x["base"]}'
+                     + (f', voce {x["voce"]} (originale battute {pz["inizio"]}-{pz["inizio"] + pz["battute"]})' if pz else '')
+                     + (f', effetto {x["effetto_voce"]}' if x.get("effetto_voce") else ''))
+        pos_b += x["battute"]
+    global ULTIMO_PIANO
+    ULTIMO_PIANO = [f"BPM {bpm:.0f}"] + piano
+    print(f"Piano del remix (BPM {bpm:.0f}):")
+    for riga in piano:
+        print("  " + riga)
+
     # Battute della base, note del basso (dagli accordi della parte di voce usata), voce montata.
     tipi, radici = [], []
     tot = sum(x["battute"] for x in sezioni)
     out = np.zeros((2, _s((tot + 1) * bat)), dtype=np.float32)
-    rit = vc.pezzo(dv, "ritornello")
+    rit = vc.pezzo(dv, "ritornello", a) or {"inizio": 0, "battute": 8, "da": a["primo_tempo"], "a": a["primo_tempo"] + 8 * bo, "fini": []}
     inizio = 0
-    eventi = []                                    # (battuta, cosa) per riser e impatti
+    eventi = []                                    # (battuta, quante, cosa) per riser e impatti
+    vol_voce = float(p.get("vol_voce", 1.1))
     for sz in sezioni:
         n = sz["battute"]
         tipi += [sz["base"]] * n
         pz = sz["pezzo"] or rit
         for i in range(n):
-            k = pz[0] + int((i % max(1, round(pz[1] * q))) / q)
+            k = pz["inizio"] + int((i % max(1, round(pz["battute"] * q))) / q)
             radici.append(dv["radici"][k] if k < len(dv["radici"]) else None)
         if sz["pezzo"]:
-            k0, lk = sz["pezzo"]
-            seg = voce[:, _s(t_orig(k0)):_s(t_orig(k0 + lk))]
-            if seg.shape[1]:
-                seg = fx.dissolvi(seg, 0.01, 0.03)
-                lung = _s(n * bat)
-                eff = sz.get("effetto_voce")
-                if eff == "chop":
-                    pezzetto = seg[:, :_s(bat / 8)]
-                    giro = np.concatenate([fx.dissolvi(pezzetto, 0.002, 0.01)] * 8 + [np.zeros_like(pezzetto)] * 8, axis=1)
-                    pieno = np.concatenate([giro] * (lung // max(giro.shape[1], 1) + 1), axis=1)
-                else:
-                    pieno = np.concatenate([seg] * (lung // seg.shape[1] + 1), axis=1)
-                pieno = fx.adatta(pieno, lung)
-                if eff == "filtro":
-                    pieno = fx.riverbero(fx.catena(pieno, fx.HighpassFilter(500), fx.LowpassFilter(5000)), 0.35, 0.8)
-                fx.metti(out, pieno, _s(inizio * bat), float(p.get("vol_voce", 1.1)) * (0.8 if eff == "filtro" else 1.0))
+            _monta_voce(out, voce, sz["pezzo"], a, r, q, bat, inizio, n, sz.get("effetto_voce"), vol_voce)
         if sz["base"] == "build":
             eventi.append((inizio, n, "salita"))
-        if sz["base"] == "pieno" and sezioni.index(sz) > 0 and tipi[inizio - 1] in ("build", "pausa"):
+        if sz["base"] == "pieno" and inizio > 0 and tipi[inizio - 1] in ("build", "pausa"):
             eventi.append((inizio, 0, "drop"))
         if sz.get("effetto_voce") == "eco" and inizio > 0:
             a0 = _s((inizio - 1) * bat)
@@ -230,6 +232,60 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
             fx.metti(out, suoni.impatto(), _s(b0 * bat), 0.6)
     out = fx.dissolvi(out[:, :_s(tot * bat)], out_s=2 * bat)
     return fx.eq_come(out, libreria.carica(b), float(p.get("eq_originale", 0.6)))
+
+
+def _accorcia(pz: dict, battute: int, a: dict) -> dict:
+    """Accorcia un pezzo a "battute" battute originali, tagliando alla fine dell'ultima frase che ci sta."""
+    limite = a["primo_tempo"] + (pz["inizio"] + battute) * a["battuta"]
+    fini = [f for f in pz.get("fini", []) if f <= limite + 0.1]
+    nuovo = dict(pz, battute=battute)
+    if fini:
+        nuovo["a"] = fini[-1]
+        nuovo["fini"] = fini
+        nuovo["righe"] = pz.get("righe", [])[:len(fini)]
+    else:
+        nuovo["a"] = limite
+    return nuovo
+
+
+def _monta_voce(out, voce, pz, a, r, q, bat, inizio_sez, n_sez, effetto, vol):
+    """Mette il pezzo di voce nella sezione: il primo battito del pezzo cade sul primo battito della sezione,
+    le parole "in levare" restano prima; si ripete se la sezione è più lunga e si taglia sempre a fine frase."""
+    bo = a["battuta"]
+    t_batt = a["primo_tempo"] + pz["inizio"] * bo                 # battuta del pezzo nel brano originale
+    da = pz["da"] - 0.08                                           # un filo prima della prima parola
+    fini = pz.get("fini") or [pz["a"]]
+    lung_pezzo = pz["battute"] * q * bat                           # durata del pezzo nella base nuova
+    inizio_s, fine_s = inizio_sez * bat, (inizio_sez + n_sez) * bat
+    if effetto == "chop":
+        p0 = _s(max(pz["da"], t_batt) / r)
+        pezzetto = fx.dissolvi(voce[:, p0:p0 + _s(bat / 8)], 0.002, 0.01)
+        if pezzetto.shape[1]:
+            giro = np.concatenate([pezzetto] * 8 + [np.zeros_like(pezzetto)] * 8, axis=1)
+            pieno = np.concatenate([giro] * (_s(n_sez * bat) // giro.shape[1] + 1), axis=1)
+            fx.metti(out, fx.adatta(pieno, _s(n_sez * bat)), _s(inizio_s), vol)
+        return
+    copia = 0
+    while True:
+        base_s = inizio_s + copia * lung_pezzo                       # dove cade il primo battito di questa copia
+        if base_s >= fine_s - 0.5 * bat:
+            break
+        # Fine: l'ultima frase che finisce prima della fine della sezione.
+        fine_ok = [f for f in fini if base_s + (f + 0.25 - t_batt) / r <= fine_s + 0.05]
+        if not fine_ok:
+            break
+        a_s, z_s = da / r, (fine_ok[-1] + 0.3) / r
+        seg = voce[:, _s(a_s):_s(z_s)]
+        if not seg.shape[1]:
+            break
+        seg = fx.dissolvi(seg, 0.02, 0.15)
+        if effetto == "filtro":
+            seg = fx.riverbero(fx.catena(seg, fx.HighpassFilter(500), fx.LowpassFilter(5000)), 0.35, 0.8)
+        pos = base_s + (da - t_batt) / r
+        fx.metti(out, seg, _s(pos), vol * (0.8 if effetto == "filtro" else 1.0))
+        copia += 1
+        if len(fine_ok) < len(fini):                                 # la sezione è finita a metà pezzo
+            break
 
 
 def _remix_completo(p: dict, b: dict, a: dict, gen: str, bpm: float, r: float) -> np.ndarray:

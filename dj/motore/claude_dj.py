@@ -24,7 +24,8 @@ Chiavi che puoi mettere in "modifiche" (metti solo quelle da cambiare):
   "struttura": elenco di sezioni nell'ordine in cui suonano. Ogni sezione:
       {"nome": testo libero, "battute": numero (multiplo di 4) oppure "voce" (= lunga quanto la parte di voce),
        "base": "intro" | "pieno" | "pausa" (senza cassa) | "build" (salita col rullante) | "silenzio",
-       "voce": null | "ritornello" | "strofa1" | "strofa2" | "strofa3" | "battute:A-B" (battute del brano originale),
+       "voce": null | "ritornello" | "strofa1" | "strofa2" | "strofa3" | "righe:A-B" (frasi del testo numerate, da A a B comprese)
+               | "battute:A-B" (battute del brano originale),
        "effetto_voce": null | "filtro" (lontana, filtrata) | "chop" (ripetuta a raffica) | "eco",
        "ripeti": numero (solo con "battute": "voce"), "max": battute originali massime (solo con "battute": "voce")}
   "durata_max_min": minuti massimi (toglie strofe se serve)
@@ -44,8 +45,10 @@ def _riassunto(b: dict, a: dict) -> dict:
          "durata_secondi": a["durata"], "battute_totali": a["battute"]}
     try:
         dv = vc.analizza_voce(b, a)
-        r["ritornello"] = dv["ritornello"]
-        r["strofe"] = [{"nome": f"strofa{i + 1}", **s} for i, s in enumerate(dv["strofe"])]
+        tieni = lambda x: {k: x[k] for k in ("inizio", "battute", "righe") if k in x} if x else None
+        r["ritornello"] = tieni(dv["ritornello"])
+        r["strofe"] = [{"nome": f"strofa{i + 1}", **tieni(s)} for i, s in enumerate(dv["strofe"])]
+        r["testo"] = [{"n": x["n"], "battuta": x["battuta"], "testo": x["testo"]} for x in dv.get("righe", [])][:120]
     except Exception:
         pass
     return r

@@ -71,10 +71,11 @@ def main() -> None:
             p = {**p, **modifiche}
             print(f"Claude: {spiegazione}")
             print(f"Modifiche: {json.dumps(modifiche, ensure_ascii=False)}")
+        ricette.ULTIMO_PIANO = []
         y = ricette.fai(p, b, con)
         titolo = a.titolo or (f"{b['titolo']} × {con['titolo']} ({p.get('nome', p['id'])})" if con
                               else f"{b['titolo']} ({p.get('nome', p['id'])})")
-        v = rendi.salva(y, titolo, p, [b] + ([con] if con else []), nota=nota, spiegazione=spiegazione)
+        v = rendi.salva(y, titolo, p, [b] + ([con] if con else []), nota=nota, spiegazione=spiegazione, piano=ricette.ULTIMO_PIANO)
         print(f"Fatto in {time.time() - t:.1f} s: {titolo} → dati/remix/{v['file']} ({v['durata']:.0f} s)")
     elif a.cmd == "remix":
         for v in rendi.leggi_indice():
