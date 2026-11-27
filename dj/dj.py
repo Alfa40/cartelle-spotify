@@ -10,6 +10,7 @@
 <brano> può essere l'id oppure qualche parola del titolo o dell'artista.
 """
 import argparse
+import json
 import sys
 import time
 
@@ -32,6 +33,8 @@ def main() -> None:
     fa.add_argument("brano")
     fa.add_argument("--con")
     fa.add_argument("--titolo")
+    fa.add_argument("--nota", help="indicazioni a parole, lette da Claude")
+    fa.add_argument("--nota-file", help="file di testo con le indicazioni (usato dal servizio)")
     sub.add_parser("remix")
     a = ap.parse_args()
 
@@ -60,10 +63,18 @@ def main() -> None:
         b = libreria.trova(a.brano)
         con = libreria.trova(a.con) if a.con else None
         t = time.time()
+        nota = a.nota or (open(a.nota_file, encoding="utf-8").read().strip() if a.nota_file else "")
+        spiegazione = ""
+        if nota:
+            from motore import claude_dj
+            modifiche, spiegazione = claude_dj.interpreta(nota, p, b, con)
+            p = {**p, **modifiche}
+            print(f"Claude: {spiegazione}")
+            print(f"Modifiche: {json.dumps(modifiche, ensure_ascii=False)}")
         y = ricette.fai(p, b, con)
         titolo = a.titolo or (f"{b['titolo']} × {con['titolo']} ({p.get('nome', p['id'])})" if con
                               else f"{b['titolo']} ({p.get('nome', p['id'])})")
-        v = rendi.salva(y, titolo, p, [b] + ([con] if con else []))
+        v = rendi.salva(y, titolo, p, [b] + ([con] if con else []), nota=nota, spiegazione=spiegazione)
         print(f"Fatto in {time.time() - t:.1f} s: {titolo} → dati/remix/{v['file']} ({v['durata']:.0f} s)")
     elif a.cmd == "remix":
         for v in rendi.leggi_indice():

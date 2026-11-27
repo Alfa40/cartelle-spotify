@@ -1,6 +1,6 @@
 // Criteri del casuale e mix salvati (es. Festa, Relax, Palestra).
-import { genresOf, isFavorite, isForgotten, isRecent, isLiked } from './library.js?v=13';
-import { familiesOf, moodsOf, isItalian, isVersion, voteOf } from './tags.js?v=13';
+import { genresOf, isFavorite, isForgotten, isRecent, isLiked } from './library.js?v=14';
+import { familiesOf, moodsOf, isItalian, isVersion, voteOf } from './tags.js?v=14';
 
 // Criteri vuoti = nessun filtro.
 export const empty = () => ({

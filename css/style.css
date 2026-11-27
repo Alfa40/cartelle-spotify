@@ -424,3 +424,4 @@ textarea:focus { outline: none; border-color: var(--accent); background: var(--s
 .dj-player[hidden] { display: none; }
 .dj-player audio { width: 100%; }
 .dj-player p { margin: 0; }
+.dj-note { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

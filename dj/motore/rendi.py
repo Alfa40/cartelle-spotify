@@ -18,7 +18,7 @@ def leggi_indice() -> list[dict]:
     return json.loads(INDICE.read_text(encoding="utf-8")) if INDICE.exists() else []
 
 
-def salva(y: np.ndarray, titolo: str, preset: dict, brani: list[dict]) -> dict:
+def salva(y: np.ndarray, titolo: str, preset: dict, brani: list[dict], nota: str = "", spiegazione: str = "") -> dict:
     import soundfile as sf
     rid = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     dest = REMIX / f"{rid}.m4a"
@@ -30,7 +30,8 @@ def salva(y: np.ndarray, titolo: str, preset: dict, brani: list[dict]) -> dict:
                         "-metadata", f"comment={AVVISO}", "-metadata", f"copyright={AVVISO}", str(dest)], check=True)
     voce = {"id": rid, "file": dest.name, "titolo": titolo, "preset": preset["id"], "preset_nome": preset.get("nome", preset["id"]),
             "brani": [{"id": b["id"], "titolo": b["titolo"], "artista": b["artista"]} for b in brani],
-            "durata": round(y.shape[1] / SR, 1), "creato": dt.datetime.now().isoformat(timespec="seconds")}
+            "durata": round(y.shape[1] / SR, 1), "creato": dt.datetime.now().isoformat(timespec="seconds"),
+            "nota": nota, "spiegazione": spiegazione}
     indice = leggi_indice()
     indice.insert(0, voce)
     INDICE.write_text(json.dumps(indice, ensure_ascii=False, indent=1), encoding="utf-8")

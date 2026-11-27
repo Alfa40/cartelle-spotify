@@ -1,12 +1,12 @@
-import * as auth from './auth.js?v=13';
-import * as api from './api.js?v=13';
-import * as folders from './folders.js?v=13';
-import * as lib from './library.js?v=13';
-import * as crit from './criteria.js?v=13';
-import * as catalog from './catalog.js?v=13';
-import * as tags from './tags.js?v=13';
-import { ICONS } from './icons.js?v=13';
-import * as dj from './dj.js?v=13';
+import * as auth from './auth.js?v=14';
+import * as api from './api.js?v=14';
+import * as folders from './folders.js?v=14';
+import * as lib from './library.js?v=14';
+import * as crit from './criteria.js?v=14';
+import * as catalog from './catalog.js?v=14';
+import * as tags from './tags.js?v=14';
+import { ICONS } from './icons.js?v=14';
+import * as dj from './dj.js?v=14';
 
 const app = document.getElementById('app');
 const showError = (msg) => toast(`Errore: ${msg}`, 8000);
@@ -1155,7 +1155,8 @@ async function showRemix() {
         <li class="tap" data-file="${esc(v.file)}">
           <div class="cover folder-ico" style="--h:${hue(v.preset)}">${djPlayer?.file === v.file ? '🔊' : '🎧'}</div>
           <div class="txt"><span class="name">${esc(v.titolo)}</span>
-            <span class="muted small-text">${durata(v.durata)} · ${saved.has(v.file) ? '📱 sul telefono' : online ? 'sul PC' : 'sul PC (spento)'}</span></div>
+            <span class="muted small-text">${durata(v.durata)} · ${saved.has(v.file) ? '📱 sul telefono' : online ? 'sul PC' : 'sul PC (spento)'}</span>
+            ${v.spiegazione ? `<span class="muted small-text dj-note">💬 ${esc(v.spiegazione)}</span>` : ''}</div>
           <button class="play" data-play-file="${esc(v.file)}" aria-label="Ascolta">▶</button>
         </li>`).join('')}</ul>`;
   };

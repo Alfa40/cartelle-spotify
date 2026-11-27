@@ -72,6 +72,26 @@ def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float 
     for b, sez in enumerate(sezioni):
         if sez == "silenzio":
             continue
+        if sez == "build":
+            # Salita: quante battute di salita mancano al drop decide quanto è fitto il rullante.
+            fine = b
+            while fine < len(sezioni) and sezioni[fine] == "build":
+                fine += 1
+            inizio = b
+            while inizio > 0 and sezioni[inizio - 1] == "build":
+                inizio -= 1
+            frazione = (b - inizio) / max(1, fine - inizio)
+            passo_r = 4 if frazione < 0.5 else 2 if frazione < 0.75 else 1
+            for st in range(0, 16, passo_r):
+                pos = int((b * bat + st * passo) * SR)
+                seg = suono["snare"][0][: n - pos] if "snare" in suono else None
+                vol = 0.3 + 0.4 * (frazione + st / 64)
+                tracce["batt"][pos:pos + len(seg)] += vol * seg
+            for st in (0, 4, 8, 12):
+                pos = int((b * bat + st * passo) * SR)
+                seg = suono["kick"][0][: n - pos]
+                tracce["batt"][pos:pos + len(seg)] += 0.8 * seg
+            continue
         meta = (b % 2) * 16
         for nome, (s, traccia, vol) in suono.items():
             if nome not in g:

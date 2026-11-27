@@ -97,31 +97,147 @@ def _velocita_voce(bpm_brano: float, bpm_base: float, mezzo: bool) -> float:
     return min(cand, key=lambda r: abs(np.log(r)))
 
 
-def remix(p: dict, b: dict, **_) -> np.ndarray:
-    a = analisi.analizza(b)
-    stem.separa(b)
-    gen = p["genere"]
-    g = ritmi.GENERI[gen]
+STRUTTURA_CLUB = [
+    {"nome": "intro", "battute": 16, "base": "intro", "voce": None},
+    {"nome": "break", "battute": 8, "base": "pausa", "voce": "ritornello", "effetto_voce": "filtro"},
+    {"nome": "salita", "battute": 8, "base": "build", "voce": "ritornello", "effetto_voce": "chop"},
+    {"nome": "drop", "battute": 16, "base": "pieno", "voce": "ritornello"},
+    {"nome": "strofa", "battute": 16, "base": "pieno", "voce": "strofa1"},
+    {"nome": "break", "battute": 8, "base": "pausa", "voce": "ritornello", "effetto_voce": "filtro"},
+    {"nome": "salita", "battute": 4, "base": "build", "voce": "ritornello", "effetto_voce": "chop"},
+    {"nome": "drop", "battute": 16, "base": "pieno", "voce": "ritornello"},
+    {"nome": "finale", "battute": 16, "base": "pieno", "voce": None, "effetto_voce": "eco"},
+]
+STRUTTURA_RAP = [
+    {"nome": "intro", "battute": 4, "base": "intro", "voce": "ritornello", "effetto_voce": "filtro"},
+    {"nome": "ritornello", "battute": "voce", "ripeti": 2, "base": "pieno", "voce": "ritornello"},
+    {"nome": "strofa", "battute": "voce", "max": 16, "base": "pieno", "voce": "strofa1"},
+    {"nome": "ritornello", "battute": "voce", "ripeti": 2, "base": "pieno", "voce": "ritornello"},
+    {"nome": "strofa", "battute": "voce", "max": 16, "base": "pieno", "voce": "strofa2"},
+    {"nome": "ritornello", "battute": "voce", "ripeti": 2, "base": "pieno", "voce": "ritornello"},
+    {"nome": "finale", "battute": 4, "base": "pieno", "voce": None, "effetto_voce": "eco"},
+]
+
+
+def _scegli_bpm(p: dict, g: dict, bpm_brano: float) -> tuple[float, float]:
+    """BPM della base e velocità della voce: dentro l'intervallo del genere, stirando la voce il meno possibile."""
     if p.get("bpm"):
         bpm = float(p["bpm"])
-        r = _velocita_voce(a["bpm"], bpm, g.get("mezzo_tempo", False))
-    else:
-        # Si sceglie il BPM della base, dentro l'intervallo del genere, che stira meno la voce
-        # (anche contando la voce a metà o al doppio del tempo).
-        lo, hi = g["intervallo"]
-        prove = []
-        for m in (0.5, 1, 2):
-            e = a["bpm"] * m
-            scelto = min(max(e, lo), hi)
-            prove.append((abs(np.log(scelto / e)), scelto, scelto / e))
-        _, bpm, r = min(prove)
+        return bpm, _velocita_voce(bpm_brano, bpm, g.get("mezzo_tempo", False))
+    lo, hi = g["intervallo"]
+    prove = []
+    for m in (0.5, 1, 2):
+        e = bpm_brano * m
+        scelto = min(max(e, lo), hi)
+        prove.append((abs(np.log(scelto / e)), scelto, scelto / e))
+    _, bpm, r = min(prove)
+    return bpm, r
+
+
+def remix(p: dict, b: dict, **_) -> np.ndarray:
+    """La voce del brano su una base nuova, con una struttura da remix: si usano il ritornello e le strofe
+    che servono, ripetuti, tagliati e con effetti, non per forza tutto il testo."""
+    from . import voce as vc
+    a = analisi.analizza(b)
+    stem.separa(b)
+    dv = vc.analizza_voce(b, a)
+    gen = p["genere"]
+    g = ritmi.GENERI[gen]
+    bpm, r = _scegli_bpm(p, g, a["bpm"])
+    if p.get("testo") == "completo":
+        return _remix_completo(p, b, a, gen, bpm, r)
+
+    bat = ritmi.battuta_s(gen, bpm)             # battuta della base nuova (secondi)
+    bo = a["battuta"]                             # battuta del brano originale
+    q = (bo / r) / bat                            # quante battute nuove dura una battuta originale
+    voce = fx.pulisci_voce(fx.stira(stem.carica(b, "vocals"), r, voce=True), float(p.get("riverbero_voce", 0.08)))
+    t_orig = lambda k: (a["primo_tempo"] + k * bo) / r   # dove inizia la battuta originale k, nella voce stirata
+
+    struttura = p.get("struttura") or (STRUTTURA_RAP if g.get("mezzo_tempo") or gen in ("reggaeton", "jerseyclub") else STRUTTURA_CLUB)
+    # Lunghezza delle sezioni "quanto la voce", e taglio delle strofe se c'è una durata massima.
+    sezioni = []
+    for sz in struttura:
+        sz = dict(sz)
+        pz = vc.pezzo(dv, sz["voce"]) if sz.get("voce") else None
+        if sz.get("battute") == "voce":
+            # "max" e "ripeti" contano le battute del brano originale (le frasi vere del testo).
+            orig = min((pz[1] if pz else 8) * int(sz.get("ripeti", 1)), int(sz.get("max", 10 ** 6)))
+            if pz and orig < pz[1]:
+                pz = (pz[0], orig)
+            sz["battute"] = max(4, int(round(orig * q / 4)) * 4)
+        sz["battute"] = int(sz["battute"])
+        sz["pezzo"] = pz
+        sezioni.append(sz)
+    durata_max = float(p.get("durata_max_min") or 0) * 60
+    while durata_max and sum(x["battute"] for x in sezioni) * bat > durata_max:
+        strofe = [i for i, x in enumerate(sezioni) if str(x.get("voce", "")).startswith("strofa")]
+        if not strofe:
+            break
+        sezioni.pop(strofe[-1])
+
+    # Battute della base, note del basso (dagli accordi della parte di voce usata), voce montata.
+    tipi, radici = [], []
+    tot = sum(x["battute"] for x in sezioni)
+    out = np.zeros((2, _s((tot + 1) * bat)), dtype=np.float32)
+    rit = vc.pezzo(dv, "ritornello")
+    inizio = 0
+    eventi = []                                    # (battuta, cosa) per riser e impatti
+    for sz in sezioni:
+        n = sz["battute"]
+        tipi += [sz["base"]] * n
+        pz = sz["pezzo"] or rit
+        for i in range(n):
+            k = pz[0] + int((i % max(1, round(pz[1] * q))) / q)
+            radici.append(dv["radici"][k] if k < len(dv["radici"]) else None)
+        if sz["pezzo"]:
+            k0, lk = sz["pezzo"]
+            seg = voce[:, _s(t_orig(k0)):_s(t_orig(k0 + lk))]
+            if seg.shape[1]:
+                seg = fx.dissolvi(seg, 0.01, 0.03)
+                lung = _s(n * bat)
+                eff = sz.get("effetto_voce")
+                if eff == "chop":
+                    pezzetto = seg[:, :_s(bat / 8)]
+                    giro = np.concatenate([fx.dissolvi(pezzetto, 0.002, 0.01)] * 8 + [np.zeros_like(pezzetto)] * 8, axis=1)
+                    pieno = np.concatenate([giro] * (lung // max(giro.shape[1], 1) + 1), axis=1)
+                else:
+                    pieno = np.concatenate([seg] * (lung // seg.shape[1] + 1), axis=1)
+                pieno = fx.adatta(pieno, lung)
+                if eff == "filtro":
+                    pieno = fx.riverbero(fx.catena(pieno, fx.HighpassFilter(500), fx.LowpassFilter(5000)), 0.35, 0.8)
+                fx.metti(out, pieno, _s(inizio * bat), float(p.get("vol_voce", 1.1)) * (0.8 if eff == "filtro" else 1.0))
+        if sz["base"] == "build":
+            eventi.append((inizio, n, "salita"))
+        if sz["base"] == "pieno" and sezioni.index(sz) > 0 and tipi[inizio - 1] in ("build", "pausa"):
+            eventi.append((inizio, 0, "drop"))
+        if sz.get("effetto_voce") == "eco" and inizio > 0:
+            a0 = _s((inizio - 1) * bat)
+            coda = out[:, a0:_s(inizio * bat)].copy()
+            fx.metti(out, fx.eco_finale(coda, bat / 4)[:, coda.shape[1]:], _s(inizio * bat), 0.6)
+        inizio += n
+
+    ultimo = None
+    for i, x in enumerate(radici):
+        radici[i] = ultimo = x if x is not None else ultimo
+    beat = ritmi.base(gen, tipi, a["tonica"], a["minore"], bpm, radici)
+    if p.get("sporco_808"):
+        beat = fx.sporco(beat, p["sporco_808"])
+    fx.metti(out, beat, 0, float(p.get("vol_base", 0.9)))
+    for b0, n, cosa in eventi:
+        if cosa == "salita":
+            fx.metti(out, fx.catena(suoni.riser(n * bat), fx.LowpassFilter(7000)), _s(b0 * bat), 0.45)
+        else:
+            fx.metti(out, suoni.impatto(), _s(b0 * bat), 0.6)
+    out = fx.dissolvi(out[:, :_s(tot * bat)], out_s=2 * bat)
+    return fx.eq_come(out, libreria.carica(b), float(p.get("eq_originale", 0.6)))
+
+
+def _remix_completo(p: dict, b: dict, a: dict, gen: str, bpm: float, r: float) -> np.ndarray:
+    """Come prima: tutto il testo, dall'inizio alla fine, sulla base nuova."""
+    g = ritmi.GENERI[gen]
     voce = fx.stira(stem.carica(b, "vocals"), r, voce=True)
     voce = fx.pulisci_voce(voce, float(p.get("riverbero_voce", 0.08)))
     basso_orig = fx.stira(stem.carica(b, "bass") + 0.5 * stem.carica(b, "other"), r)
-    altro = None
-    if p.get("tieni_resto"):
-        altro = fx.stira(stem.carica(b, "other"), r)
-
     bat = ritmi.battuta_s(gen, bpm)
     intro_b = int(p.get("intro_battute", 8))
     outro_b = int(p.get("outro_battute", 8))
@@ -132,27 +248,13 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
         sezioni.append("pausa" if p.get("pause", True) and i % 16 in (14, 15) else "pieno")
     sezioni += ["pieno"] * outro_b
     pos = _s(intro_b * bat - t0)
-    radici = _radici(basso_orig, pos, len(sezioni), bat) if p.get("basso_dagli_accordi", True) else None
+    radici = _radici(basso_orig, pos, len(sezioni), bat)
     beat = ritmi.base(gen, sezioni, a["tonica"], a["minore"], bpm, radici)
-    if p.get("sporco_808"):
-        beat = fx.sporco(beat, p["sporco_808"])
-
     out = np.zeros_like(beat)
     fx.metti(out, beat, 0, float(p.get("vol_base", 0.9)))
     fx.metti(out, voce, pos, float(p.get("vol_voce", 1.1)))
-    if altro is not None:
-        fx.metti(out, altro, pos, float(p.get("vol_resto", 0.35)))
-    if p.get("chop_voce"):
-        # Ogni 8 battute: l'ultimo battito diventa una raffica della voce (stile jersey).
-        for k in range(intro_b + 8, intro_b + corpo_b, 8):
-            a0 = _s((k - 1) * bat + 0.75 * bat)
-            pezzo = out[:, a0:a0 + _s(bat / 16)]
-            if pezzo.shape[1]:
-                out[:, a0:a0 + _s(bat / 4)] = fx.adatta(fx.stutter(pezzo, bat / 16, 4), _s(bat / 4))[:, : out.shape[1] - a0]
-    if p.get("impatto_inizio", True):
-        fx.metti(out, suoni.impatto(), _s(intro_b * bat), 0.7)
-    fine = _s(len(sezioni) * bat)
-    out = fx.dissolvi(out[:, :fine], out_s=4 * bat)
+    fx.metti(out, suoni.impatto(), _s(intro_b * bat), 0.6)
+    out = fx.dissolvi(out[:, :_s(len(sezioni) * bat)], out_s=4 * bat)
     return fx.eq_come(out, libreria.carica(b), float(p.get("eq_originale", 0.6)))
 
 

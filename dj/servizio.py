@@ -87,7 +87,13 @@ def _trova(b: dict | str | None) -> dict | None:
         return None
     brani = libreria.leggi_indice()
     if isinstance(b, str):
-        return next((x for x in brani if x["id"] == b), None) or libreria.trova(b)
+        esatto = next((x for x in brani if x["id"] == b), None)
+        if esatto or len(b) < 4:
+            return esatto
+        try:
+            return libreria.trova(b)
+        except LookupError:
+            return None
     if b.get("id"):
         hit = next((x for x in brani if x["id"] == b["id"]), None)
         if hit:
@@ -115,16 +121,21 @@ def esegui(x: dict) -> None:
         log(f"Richiesta {x['id']}: manca {nomi}")
         return
     aggiorna(x["id"], stato="in lavorazione")
-    cmd = f'"{PYTHON}" "{DJ}" fai {x["preset"]} {b["id"]}' + (f" --con {con['id']}" if con else "")
+    cmd = f'"{PYTHON}" -W ignore "{DJ}" fai {x["preset"]} {b["id"]}' + (f" --con {con['id']}" if con else "")
+    if x.get("nota"):
+        nf = DATI / "note" / f"{x['id']}.txt"
+        nf.parent.mkdir(exist_ok=True)
+        nf.write_text(x["nota"], encoding="utf-8")
+        cmd += f' --nota-file "{nf}"'
+        aggiorna(x["id"], stato="in lavorazione", messaggio="Claude legge le tue indicazioni…")
     t = time.time()
     r = subprocess.run(["node", CODA, "--ram=8", "--gruppo=gpu", "--", cmd], capture_output=True, text=True,
                        encoding="utf-8", errors="replace", creationflags=NASCOSTO)
     fatto = re.search(r"dati/remix/(\S+\.m4a)", r.stdout or "")
     if r.returncode == 0 and fatto:
         rem = next((v for v in rendi.leggi_indice() if v["file"] == fatto.group(1)), None)
-        if rem and x.get("nota"):
-            rem["nota"] = x["nota"]
-        aggiorna(x["id"], stato="fatto", remix=rem["id"] if rem else None, secondi=round(time.time() - t))
+        aggiorna(x["id"], stato="fatto", remix=rem["id"] if rem else None, secondi=round(time.time() - t),
+                 messaggio=(rem or {}).get("spiegazione", ""))
         log(f"Richiesta {x['id']} fatta in {time.time() - t:.0f} s")
     else:
         errore = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["errore sconosciuto"]
@@ -205,6 +216,20 @@ class Gestore(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        try:
+            self._get()
+        except Exception as e:
+            log(f"Errore GET {self.path}: {e}")
+            self._json({"errore": str(e)[:200]}, 500)
+
+    def do_POST(self):
+        try:
+            self._post()
+        except Exception as e:
+            log(f"Errore POST {self.path}: {e}")
+            self._json({"errore": str(e)[:200]}, 500)
+
+    def _get(self):
         p = urlparse(self.path).path
         if p == "/api/stato":
             return self._json({"ok": True, "versione": 1})
@@ -244,14 +269,19 @@ class Gestore(BaseHTTPRequestHandler):
             return
         self._json({"errore": "non trovato"}, 404)
 
-    def do_POST(self):
+    def _post(self):
         if not self._autorizzato():
             return
         p = urlparse(self.path).path
         lung = int(self.headers.get("Content-Length") or 0)
         try:
-            corpo = json.loads(self.rfile.read(lung) or b"{}")
-        except json.JSONDecodeError:
+            grezzo = self.rfile.read(lung) or b"{}"
+            try:
+                testo = grezzo.decode("utf-8")
+            except UnicodeDecodeError:
+                testo = grezzo.decode("cp1252", errors="replace")
+            corpo = json.loads(testo)
+        except ValueError:
             return self._json({"errore": "richiesta non valida"}, 400)
         if p == "/api/richiesta":
             if not corpo.get("preset") or not corpo.get("brano"):
