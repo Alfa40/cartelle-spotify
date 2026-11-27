@@ -1,0 +1,17 @@
+{
+ "nome": "Sporca",
+ "descrizione": "Intro di sola batteria con sirena, riser e stop prima del drop, impatto e tromba sul drop, eco alla fine",
+ "tipo": "edit",
+ "intro_battute": 8,
+ "outro_battute": 8,
+ "bassi_db": 3,
+ "effetti": [
+  "sirena_inizio",
+  "riser_drop",
+  "stop_prima_drop",
+  "impatto_drop",
+  "tromba_drop",
+  "riverbero_pause",
+  "eco_finale"
+ ]
+}

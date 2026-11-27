@@ -1,0 +1,7 @@
+{
+ "nome": "Bassi pesanti",
+ "descrizione": "Stessa velocità, bassi potenziati",
+ "tipo": "velocita",
+ "fattore": 1.0,
+ "bassi_db": 8
+}

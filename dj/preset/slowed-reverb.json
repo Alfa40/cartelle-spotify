@@ -1,0 +1,8 @@
+{
+ "nome": "Slowed + reverb",
+ "descrizione": "Più lento e grave, con tanto riverbero",
+ "tipo": "velocita",
+ "fattore": 0.85,
+ "riverbero": 0.35,
+ "stanza": 0.85
+}

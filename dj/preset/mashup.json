@@ -1,0 +1,7 @@
+{
+ "nome": "Mashup",
+ "descrizione": "Voce del primo brano sulla base del secondo, a tempo e in tonalità",
+ "tipo": "mashup",
+ "tonalita": "adatta",
+ "entra_battuta": 8
+}

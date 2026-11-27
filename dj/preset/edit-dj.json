@@ -1,0 +1,9 @@
+{
+ "nome": "Edit per DJ",
+ "descrizione": "Intro e finale di sola batteria (16 battute) per mixare comodo, brano pulito",
+ "tipo": "edit",
+ "intro_battute": 16,
+ "outro_battute": 16,
+ "effetti": [],
+ "intro_filtro": false
+}
