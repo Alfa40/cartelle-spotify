@@ -290,14 +290,14 @@ function showHome() {
     </section>
 
     <div class="tiles">
-      <button id="btn-criteria" class="tile t1"><span class="ico">${ICONS.dice}</span><b>Casuale</b><small>con i tuoi criteri</small></button>
+      <button id="btn-criteria" class="tile t1"><span class="ico">${ICONS.dice}</span><b>Casuale con filtri</b><small>anni, generi, mood…</small></button>
       <button id="btn-rate" class="tile t2"><span class="ico">${ICONS.headphones}</span><b>Valuta</b><small>il brano in ascolto</small></button>
       <button id="btn-new" class="tile t3"><span class="ico">${ICONS.folderPlus}</span><b>Nuova cartella</b><small>di playlist</small></button>
       <button id="btn-catalog" class="tile t4"><span class="ico">${ICONS.deck}</span><b>Remix</b><small>${catalogRun ? 'ricerca in corso…' : 'catalogo da scaricare'}</small></button>
     </div>
 
     <section class="card">
-      <div class="card-head"><h3>Cartelle <span class="count">${all.length || ''}</span></h3></div>
+      <div class="card-head"><h3>Cartelle <span class="count">${all.length || ''}</span></h3><button class="small" data-go="#/casuale">🎛️ Filtri</button></div>
       ${all.length ? '' : '<p class="muted small-text">Crea una cartella e mettici le playlist che vuoi: la stessa playlist può stare in più cartelle.</p>'}
       <ul class="list folders">
         ${all.map((f) => `
@@ -337,6 +337,7 @@ function showHome() {
     </section>`;
 
   document.getElementById('btn-criteria').onclick = () => { location.hash = '#/casuale'; };
+  app.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => { location.hash = b.dataset.go; }; });
   document.getElementById('btn-rate').onclick = () => rateNowPlaying();
   document.getElementById('btn-catalog').onclick = () => { location.hash = '#/catalogo'; };
   app.querySelector('.moods').addEventListener('click', (ev) => {
@@ -382,6 +383,7 @@ function showFolder(id) {
       <h2>📁 ${esc(f.name)}</h2>
       <p class="muted small-text">${nPlaylist(pls.length)} · ${on.length} spuntate per il casuale</p>
       <button id="btn-play" class="primary" ${on.length ? '' : 'disabled'}>▶ Casuale ${on.length === pls.length ? 'su tutto' : `su ${nPlaylist(on.length)}`}</button>
+      <button id="btn-filters" class="primary soft" ${pls.length ? '' : 'disabled'}>🎛️ Casuale con filtri</button>
       ${others && on.length > 1 ? `<p class="muted small-text note">${others === 1 ? '1 playlist spuntata è' : `${others} playlist spuntate sono`} di altri: Spotify non ci fa leggere i loro brani, quindi nel mix vengono saltate.</p>` : ''}
       <div class="row tools">
         <button id="btn-edit" class="small">+ Aggiungi / togli playlist</button>
@@ -412,6 +414,7 @@ function showFolder(id) {
   window.scrollTo(0, 0);
 
   document.getElementById('btn-play').onclick = () => playFolder(folders.get(id));
+  document.getElementById('btn-filters').onclick = () => { location.hash = `#/casuale/cartella/${id}`; };
   document.getElementById('btn-edit').onclick = async () => { await pickPlaylists(folders.get(id)); showFolder(id); };
   document.getElementById('btn-rename').onclick = async () => {
     const name = await askName('Rinomina cartella', f.name);
@@ -580,7 +583,7 @@ const needsLiked = (c) => c.liked !== 'any' && !lib.likedKnown();
 
 async function playFiltered(pool, c, deviceId) {
   const list = crit.pick(crit.filter(pool, c), c, MAX_MIX);
-  if (!list.length) return 'Nessun brano corrisponde ai criteri';
+  if (!list.length) return 'Nessun brano corrisponde ai filtri';
   await api.playUris(list.map((t) => t.uri), deviceId);
   const min = Math.round(list.reduce((s, t) => s + (t.ms || 210_000), 0) / 60_000);
   return `▶ ${list.length} ${list.length === 1 ? 'brano' : 'brani'} in casuale (${min >= 90 ? `${Math.round(min / 6) / 10} ore` : `${min} min`})`;
@@ -622,10 +625,11 @@ const oneChips = (c, k) => OPTIONS[k].map(([v, l]) =>
 const manyChip = (c, k, v, label, n) =>
   `<button class="chip ${c[k].includes(v) ? 'on' : ''}" data-act="many" data-k="${k}" data-v="${v}" data-num="${typeof v === 'number' ? 1 : ''}">${c[k].includes(v) ? '✓ ' : ''}${esc(label)}${n != null ? ` <span class="muted">${n}</span>` : ''}</button>`;
 
-async function showCriteria(moodId) {
+async function showCriteria(moodId, source) {
   btnLogout.hidden = false;
   const mood = moodId ? crit.moods().find((m) => m.id === moodId) : null;
   const c = { ...crit.empty(), ...(mood ? mood.criteria : readLast()) };
+  if (source) c.source = source;
   if (c.source.startsWith('folder:') && !folders.get(c.source.slice(7))) c.source = 'all';
   let here = location.hash;
   const stillHere = () => location.hash === here;
@@ -638,7 +642,7 @@ async function showCriteria(moodId) {
   app.innerHTML = `
     <button class="link back" onclick="location.hash=''">← Home</button>
     <section class="card">
-      <h2>🎲 ${mood ? esc(mood.name) : 'Casuale con criteri'}</h2>
+      <h2>🎲 ${mood ? esc(mood.name) : 'Casuale con filtri'}</h2>
       <label for="src">Da dove prendo i brani</label>
       <select id="src">
         <option value="all">Tutte le tue playlist + Brani che ti piacciono</option>
@@ -732,7 +736,7 @@ async function showCriteria(moodId) {
     <h4>Brani che ti piacciono</h4><div class="chips">${oneChips(c, 'liked')}</div>
     <h4>Le tue valutazioni</h4><div class="chips">${oneChips(c, 'vote')}</div>
     <h4>Messi in playlist</h4><div class="chips">${oneChips(c, 'added')}</div>
-    <p class="muted small-text">Spotify fa vedere solo i tuoi 50 brani più ascoltati e gli ultimi 50 ascolti. Ogni volta che apri l'app li aggiungo a uno storico sul telefono, quindi questi criteri diventano più precisi col tempo.</p>`;
+    <p class="muted small-text">Spotify fa vedere solo i tuoi 50 brani più ascoltati e gli ultimi 50 ascolti. Ogni volta che apri l'app li aggiungo a uno storico sul telefono, quindi questi filtri diventano più precisi col tempo.</p>`;
 
   const secOther = () => `
     <h4>Provenienza</h4><div class="chips">${oneChips(c, 'origin')}</div>
@@ -853,7 +857,7 @@ async function showCriteria(moodId) {
     toast('Filtri azzerati');
   };
   document.getElementById('btn-go').onclick = () => {
-    const label = mood?.name || 'Casuale con criteri';
+    const label = mood?.name || 'Casuale con filtri';
     play((d) => playFiltered(pool, c, d), label);
   };
   document.getElementById('btn-save').onclick = async () => {
@@ -1147,6 +1151,7 @@ function route() {
   let m;
   if ((m = h.match(/^#\/playlist\/(\w+)/))) showPlaylist(m[1]);
   else if ((m = h.match(/^#\/cartella\/(\w+)/))) showFolder(m[1]);
+  else if ((m = h.match(/^#\/casuale\/cartella\/(\w+)$/))) showCriteria(null, `folder:${m[1]}`);
   else if ((m = h.match(/^#\/casuale(?:\/(\w+))?$/))) showCriteria(m[1]);
   else if (h === '#/catalogo') showCatalog();
   else showHome();

@@ -373,3 +373,7 @@ summary { cursor: pointer; padding: 8px 0; color: var(--accent-deep); font-weigh
 .hello .avatar svg { width: 32px; height: 32px; }
 /* iPhone: niente zoom quando si tocca un campo (serve testo di almeno 16px) */
 input, select { font-size: 16px; }
+button.primary.soft {
+  background: var(--accent-soft); color: var(--text); margin-top: 10px;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--accent) 45%, transparent);
+}
