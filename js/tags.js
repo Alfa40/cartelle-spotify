@@ -1,7 +1,7 @@
 // Generi "semplici" (rap, trap, jazz...), mood (vivace, aggressivo...) e valutazioni dei brani.
 // Spotify non dà più l'energia o la ballabilità dei brani: il mood parte da un'ipotesi fatta sul genere
 // e diventa più preciso con le tue valutazioni (brano per brano e, di riflesso, artista per artista).
-import { genresOf } from './library.js?v=14';
+import { genresOf } from './library.js?v=15';
 
 // ---------- Famiglie di generi ----------
 // Spotify dà generi molto precisi ("trap italiana", "italian hip hop"...): li raggruppiamo.

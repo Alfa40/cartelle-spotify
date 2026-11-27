@@ -6,6 +6,7 @@
   python dj.py preset                           impostazioni standard disponibili
   python dj.py fai <preset> <brano> [--con <brano>]   crea il remix (per i mashup: voce dal primo, base dal secondo)
   python dj.py remix                            remix già fatti
+  python dj.py prepara <brano>                  prepara un brano per i remix (analisi, voce, testo)
 
 <brano> può essere l'id oppure qualche parola del titolo o dell'artista.
 """
@@ -36,6 +37,7 @@ def main() -> None:
     fa.add_argument("--nota", help="indicazioni a parole, lette da Claude")
     fa.add_argument("--nota-file", help="file di testo con le indicazioni (usato dal servizio)")
     sub.add_parser("remix")
+    sub.add_parser("prepara").add_argument("brano")
     a = ap.parse_args()
 
     if a.cmd == "importa":
@@ -77,6 +79,17 @@ def main() -> None:
                               else f"{b['titolo']} ({p.get('nome', p['id'])})")
         v = rendi.salva(y, titolo, p, [b] + ([con] if con else []), nota=nota, spiegazione=spiegazione, piano=ricette.ULTIMO_PIANO)
         print(f"Fatto in {time.time() - t:.1f} s: {titolo} → dati/remix/{v['file']} ({v['durata']:.0f} s)")
+    elif a.cmd == "prepara":
+        # Tutto il lavoro lungo fatto prima: tempo, voce separata, testo, ritornello e strofe.
+        from motore import voce
+        b = libreria.trova(a.brano)
+        t = time.time()
+        x = analisi.analizza(b)
+        stem.separa(b)
+        dv = voce.analizza_voce(b, x)
+        rit = dv.get("ritornello") or {}
+        print(f"Pronto in {time.time() - t:.0f} s: {b['titolo']} — {x['bpm']} BPM, {x['nota']}, "
+              f"ritornello: {' / '.join(rit.get('righe', [])[:2]) or 'non trovato'}")
     elif a.cmd == "remix":
         for v in rendi.leggi_indice():
             print(f"{v['id']}  {v['titolo']}  ({v['durata']:.0f} s)")

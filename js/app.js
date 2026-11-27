@@ -1,12 +1,13 @@
-import * as auth from './auth.js?v=14';
-import * as api from './api.js?v=14';
-import * as folders from './folders.js?v=14';
-import * as lib from './library.js?v=14';
-import * as crit from './criteria.js?v=14';
-import * as catalog from './catalog.js?v=14';
-import * as tags from './tags.js?v=14';
-import { ICONS } from './icons.js?v=14';
-import * as dj from './dj.js?v=14';
+import * as auth from './auth.js?v=15';
+import * as api from './api.js?v=15';
+import * as folders from './folders.js?v=15';
+import * as lib from './library.js?v=15';
+import * as crit from './criteria.js?v=15';
+import * as catalog from './catalog.js?v=15';
+import * as tags from './tags.js?v=15';
+import { ICONS } from './icons.js?v=15';
+import * as dj from './dj.js?v=15';
+import * as spesa from './spesa.js?v=15';
 
 const app = document.getElementById('app');
 const showError = (msg) => toast(`Errore: ${msg}`, 8000);
@@ -1103,7 +1104,8 @@ async function showRemix() {
     <section class="card">
       <h3>Altro</h3>
       <div class="row">
-        <button class="small" onclick="location.hash='#/catalogo'">🛒 Quali brani posso comprare</button>
+        <button class="small" onclick="location.hash='#/spesa'">🛒 Lista della spesa</button>
+        <button class="small" onclick="location.hash='#/catalogo'">🔎 Cosa è in vendita</button>
         <button class="small" id="dj-forget">Scollega</button>
       </div>
     </section>
@@ -1283,6 +1285,167 @@ async function showRemix() {
   poll();
 }
 
+// ---------- Lista della spesa ----------
+async function showSpesa() {
+  btnLogout.hidden = false;
+  const here = location.hash;
+  app.innerHTML = `<div id="spesa-root">
+    <button class="link back" onclick="history.length > 1 ? history.back() : (location.hash='#/remix')">← Indietro</button>
+    <section class="card">
+      <h2>🛒 Lista della spesa</h2>
+      <p class="muted small-text">I brani che ascolti di più, divisi tra <b>album da cercare come CD usato</b> (conviene quando ti piacciono più brani dello stesso album) e <b>brani da comprare in digitale</b> (singoli e uscite recenti). In ordine di importanza: prima quello che ascolti di più e costa meno.</p>
+    </section>
+    <div id="spesa-body"><p class="muted center">Guardo cosa ascolti…</p></div></div>`;
+  window.scrollTo(0, 0);
+  const body = document.getElementById('spesa-body');
+  const stillHere = () => location.hash === here;
+  if (dj.configured()) dj.refresh().catch(() => {});
+
+  let top, groups;
+  try {
+    ({ top, groups } = await gruppiAscolti((d, n) => {
+      if (stillHere()) body.innerHTML = `<p class="muted center">Leggo le tue playlist: ${d} di ${n}…</p>`;
+    }));
+  } catch (e) {
+    body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i tuoi ascolti: ${esc(e.message)}</p></section>`;
+    return;
+  }
+  if (!stillHere()) return;
+
+  // Brani chiesti al DJ AI che non erano nella libreria: vanno in cima.
+  const mancanti = dj.cached.attesa().filter((x) => x.stato === 'manca');
+  const richiesti = [];
+  for (const m of mancanti) {
+    for (const b of [m.brano, m.con]) {
+      if (!b || typeof b === 'string' || !b.uri) continue;
+      try { richiesti.push(await api.spotify(`/tracks/${b.uri.split(':').pop()}`)); }
+      catch { richiesti.push({ uri: b.uri, name: b.titolo, artists: (b.artisti || []).map((n) => ({ name: n })), external_ids: { isrc: b.isrc } }); }
+    }
+  }
+  if (richiesti.length) groups.unshift({ key: 'dj', label: '🎛️ Chiesti al DJ AI', tracks: richiesti, on: true, score: 200 });
+
+  const short = new Set(top.short_term), medium = new Set(top.medium_term);
+  const righe = () => {
+    const m = new Map();
+    for (const g of groups.filter((x) => x.on)) {
+      for (const t of g.tracks) {
+        if (!t?.uri || t.is_local) continue;
+        const r = m.get(t.uri) || { t, sources: [], punti: 0 };
+        r.sources.push(g.label);
+        if (t.album && !r.t.album) r.t = t;
+        m.set(t.uri, r);
+      }
+    }
+    for (const r of m.values()) {
+      const u = r.t.uri;
+      r.punti = 1 + r.sources.length + (short.has(u) ? 5 : 0) + (medium.has(u) ? 3 : 0)
+        + 2 * Math.min(lib.historyOf(u)?.n || 0, 10) + (r.sources.includes('🎛️ Chiesti al DJ AI') ? 20 : 0);
+    }
+    return [...m.values()];
+  };
+
+  const euro = (n) => n.toFixed(2).replace('.', ',') + ' €';
+  let mostra = 30;
+  const render = () => {
+    const { voci, giaInLibreria, nonInVendita } = spesa.prepara(righe(), { brani: dj.cached.brani(), esito: (u) => catalog.resultOf(u) });
+    const daPrendere = voci.filter((v) => !v.preso);
+    const cd = daPrendere.filter((v) => v.come === 'cd'), dig = daPrendere.filter((v) => v.come === 'digitale');
+    const tot = daPrendere.reduce((s, v) => s + v.costo, 0);
+    const braniTot = daPrendere.reduce((s, v) => s + v.brani.length, 0);
+    const budget = [25, 50, 100, 200].filter((e) => e < tot).map((e) => ({ e, ...spesa.conBudget(voci, e) })).filter((x) => x.brani);
+    if (tot > 0) budget.push({ e: 'Tutto', brani: braniTot, voci: daPrendere.length, spesa: tot });
+    body.innerHTML = `
+      <section class="card">
+        <h3>Da dove prendo i brani</h3>
+        <div class="chips" id="spesa-gruppi">${groups.map((g, i) => `<button class="chip ${g.on ? 'on' : ''}" data-g="${i}">${esc(g.label)}</button>`).join('')}</div>
+      </section>
+      <section class="card">
+        <div class="stats">
+          <div><b>${cd.length}</b><span>CD usati da cercare</span></div>
+          <div><b>${dig.length}</b><span>brani digitali</span></div>
+          <div><b>${euro(tot)}</b><span>circa, per ${braniTot} brani</span></div>
+        </div>
+        ${budget.length ? `<h4>Con un budget di…</h4><ul class="list plain">${budget.map((x) => `<li><span class="txt"><span class="name">${typeof x.e === 'number' ? x.e + ' €' : x.e}</span><span class="muted small-text">${x.brani} brani (${x.voci} acquisti, ${euro(x.spesa)})</span></span></li>`).join('')}</ul>` : ''}
+        <p class="muted small-text">Prezzi stimati: CD usato circa 6 € (di solito 3–8 €), brano digitale circa 1,29 €. ${giaInLibreria.length ? (giaInLibreria.length === 1 ? '1 brano è già nella libreria del PC.' : `${giaInLibreria.length} brani sono già nella libreria del PC.`) : ''}</p>
+      </section>
+      <section class="card">
+        <h3>Da prendere</h3>
+        <ul class="list spesa">${daPrendere.slice(0, mostra).map((v) => voce(v)).join('') || '<li class="muted">Niente da prendere 🎉</li>'}</ul>
+        ${daPrendere.length > mostra ? `<button class="small" id="spesa-altri">Mostra altri ${Math.min(30, daPrendere.length - mostra)}</button>` : ''}
+      </section>
+      ${voci.some((v) => v.preso) ? `<section class="card"><details><summary>Già presi (${voci.filter((v) => v.preso).length})</summary>
+        <ul class="list spesa">${voci.filter((v) => v.preso).map((v) => voce(v)).join('')}</ul></details></section>` : ''}
+      ${nonInVendita.length ? `<section class="card"><details><summary>Non in vendita (${nonInVendita.length})</summary>
+        <p class="muted small-text">Il controllo del catalogo non li ha trovati in vendita (per esempio mixtape usciti solo online). Prova a cercarli su Bandcamp o tra i download gratuiti degli artisti.</p>
+        <ul class="list plain">${nonInVendita.map((r) => `<li><span class="txt"><span class="name">${esc(r.t.name)}</span><span class="muted small-text">${esc((r.t.artists || []).map((a) => a.name).join(', '))}</span></span>
+          <a class="chip" href="${spesa.link.bandcamp((r.t.artists?.[0]?.name || '') + ' ' + r.t.name)}" target="_blank" rel="noopener">Bandcamp ↗</a></li>`).join('')}</ul></details></section>` : ''}
+      <section class="card"><p class="muted small-text">Quando hai i file, mettili nella cartella <b>“Brani per il DJ AI”</b> sul desktop del PC: il PC li aggiunge da solo alla libreria e li prepara per i remix.</p></section>`;
+  };
+  const voce = (v) => {
+    const brani = v.brani.map((r) => r.t.name);
+    const sotto = v.come === 'cd'
+      ? `💿 CD usato · ${v.totale ? `${v.totale} brani, di cui ` : ''}${v.brani.length} che ascolti: ${esc(brani.slice(0, 3).join(', '))}${brani.length > 3 ? '…' : ''}`
+      : `🎵 Digitale${v.nota ? ' · ' + v.nota : ''}`;
+    const negozi = v.come === 'cd'
+      ? [['Vinted', spesa.link.vinted(v.cerca)], ['eBay', spesa.link.ebay(v.cerca)], ['Subito', spesa.link.subito(v.cerca)]]
+      : [['Amazon', spesa.link.amazon(v.cerca)], ['Qobuz', spesa.link.qobuz(v.cerca)], ['Bandcamp', spesa.link.bandcamp(v.cerca)]];
+    return `<li class="spesa-voce ${v.preso ? 'presa' : ''}">
+      <div class="spesa-testa">
+        ${v.immagine ? `<img class="cover" src="${esc(v.immagine)}" alt="" loading="lazy">` : `<div class="cover folder-ico">${v.come === 'cd' ? '💿' : '🎵'}</div>`}
+        <div class="txt"><span class="name">${esc(v.titolo)}</span><span class="muted small-text">${esc(v.artisti)}${v.uscita ? ' · ' + esc(v.uscita.slice(0, 4)) : ''}</span>
+          <span class="muted small-text">${sotto}</span></div>
+        <label class="check-only" aria-label="Preso"><input type="checkbox" data-preso="${esc(v.id)}" ${v.preso ? 'checked' : ''}></label>
+      </div>
+      <div class="chips">${negozi.map(([n, u]) => `<a class="chip" href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join('')}
+        <span class="muted small-text">~${euro(v.costo)}</span></div>
+    </li>`;
+  };
+  document.getElementById('spesa-root').addEventListener('click', (ev) => {
+    const g = ev.target.closest('[data-g]');
+    if (g) { groups[g.dataset.g].on = !groups[g.dataset.g].on; render(); return; }
+    if (ev.target.closest('#spesa-altri')) { mostra += 30; render(); }
+  });
+  document.getElementById('spesa-root').addEventListener('change', (ev) => {
+    const cb = ev.target.closest('[data-preso]');
+    if (cb) { spesa.segna(cb.dataset.preso, cb.checked); render(); toast(cb.checked ? 'Segnato come preso ✓' : 'Tolto dai presi'); }
+  });
+  render();
+}
+
+// Cartelle e playlist ascoltate ultimamente, in ordine (usate dal catalogo e dalla lista della spesa).
+async function gruppiAscolti(onProgress) {
+  await loadListening();
+  const top = await lib.loadTop();
+  const topRecent = new Set([...top.short_term, ...top.medium_term]);
+  // Punteggio "ascoltata ultimamente" di ogni playlist tua: 5 punti per ogni ultimo ascolto
+  // partito da lì, 1 punto per ogni suo brano tra i tuoi più ascoltati dell'ultimo periodo.
+  const mine = state.playlists.filter(isMine);
+  const plTracks = new Map();
+  let done = 0;
+  await api.mapLimit(mine, 3, async (p) => {
+    try { plTracks.set(p.id, await api.playlistTracksCached(p)); } catch { plTracks.set(p.id, []); }
+    onProgress?.(++done, mine.length);
+  });
+  const plScore = (p) => 5 * lib.playsFrom(p.id) + (plTracks.get(p.id) || []).filter((t) => topRecent.has(t.uri)).length;
+  const groups = [];
+  const topTracks = [...top.items.short_term, ...top.items.medium_term];
+  groups.push({ key: 'top', label: '⭐ I tuoi più ascoltati (ultimo mese e ultimi 6 mesi)', tracks: topTracks, on: true, score: 99 });
+  groups.push({ key: 'recent', label: '🕑 I tuoi ultimi 50 ascolti', tracks: lib.recentList(), on: true, score: 98 });
+  const inFolders = new Set();
+  for (const f of folders.list()) {
+    const pls = f.playlists.map(byId).filter((p) => p && isMine(p));
+    pls.forEach((p) => inFolders.add(p.id));
+    const score = pls.reduce((sum, p) => sum + plScore(p), 0);
+    groups.push({ key: 'f:' + f.id, label: `📁 ${f.name}`, tracks: pls.flatMap((p) => plTracks.get(p.id) || []), on: score > 0, score, folder: true });
+  }
+  const others = mine.filter((p) => !inFolders.has(p.id) && plScore(p) > 0).sort((x, y) => plScore(y) - plScore(x));
+  for (const p of others) {
+    groups.push({ key: 'p:' + p.id, label: `🎵 ${p.name}`, tracks: plTracks.get(p.id) || [], on: true, score: plScore(p) });
+  }
+  groups.sort((x, y) => y.score - x.score);
+  return { top, groups };
+}
+
 // ---------- Catalogo per remix e mashup ----------
 let catalogRun = null; // ricerca in corso: { stop: bool }
 
@@ -1299,49 +1462,16 @@ async function showCatalog() {
   window.scrollTo(0, 0);
   const body = document.getElementById('cat-body');
 
-  // 1. Ascolti e brani più ascoltati
-  let top;
+  let top, groups;
   try {
-    await loadListening();
-    top = await lib.loadTop();
+    ({ top, groups } = await gruppiAscolti((d, n) => {
+      if (location.hash === here) body.innerHTML = `<p class="muted center">Leggo le tue playlist: ${d} di ${n}…</p>`;
+    }));
   } catch (e) {
     body.innerHTML = `<section class="card"><p class="error">Non riesco a leggere i tuoi ascolti: ${esc(e.message)}</p></section>`;
     return;
   }
-  const topRecent = new Set([...top.short_term, ...top.medium_term]);
-
-  // 2. Punteggio "ascoltata ultimamente" di ogni playlist tua: 5 punti per ogni ultimo ascolto
-  //    partito da lì, 1 punto per ogni suo brano tra i tuoi più ascoltati dell'ultimo periodo.
-  const mine = state.playlists.filter(isMine);
-  const plTracks = new Map();
-  let done = 0;
-  await Promise.all(mine.map(async (p) => {
-    try { plTracks.set(p.id, await api.playlistTracksCached(p)); } catch { plTracks.set(p.id, []); }
-    done++;
-    if (stillOn()) body.innerHTML = `<p class="muted center">Leggo le tue playlist: ${done} di ${mine.length}…</p>`;
-  }));
-  function stillOn() { return location.hash === here; }
-  if (!stillOn()) return;
-
-  const plScore = (p) => 5 * lib.playsFrom(p.id) + (plTracks.get(p.id) || []).filter((t) => topRecent.has(t.uri)).length;
-
-  // Gruppi tra cui scegliere
-  const groups = [];
-  const topTracks = [...top.items.short_term, ...top.items.medium_term];
-  groups.push({ key: 'top', label: '⭐ I tuoi più ascoltati (ultimo mese e ultimi 6 mesi)', tracks: topTracks, on: true, score: 99 });
-  groups.push({ key: 'recent', label: '🕑 I tuoi ultimi 50 ascolti', tracks: lib.recentList(), on: true, score: 98 });
-  const inFolders = new Set();
-  for (const f of folders.list()) {
-    const pls = f.playlists.map(byId).filter((p) => p && isMine(p));
-    pls.forEach((p) => inFolders.add(p.id));
-    const score = pls.reduce((s, p) => s + plScore(p), 0);
-    groups.push({ key: 'f:' + f.id, label: `📁 ${f.name}`, tracks: pls.flatMap((p) => plTracks.get(p.id) || []), on: score > 0, score, folder: true });
-  }
-  const others = mine.filter((p) => !inFolders.has(p.id) && plScore(p) > 0).sort((a, b) => plScore(b) - plScore(a));
-  for (const p of others) {
-    groups.push({ key: 'p:' + p.id, label: `🎵 ${p.name}`, tracks: plTracks.get(p.id) || [], on: true, score: plScore(p) });
-  }
-  groups.sort((a, b) => b.score - a.score);
+  if (location.hash !== here) return;
 
   const stars = (s) => (s >= 98 ? '' : s >= 20 ? ' · ascoltata molto di recente' : s >= 5 ? ' · ascoltata di recente' : s > 0 ? ' · ascoltata un po\'' : ' · non ascoltata di recente');
 
@@ -1474,6 +1604,7 @@ function route() {
   else if ((m = h.match(/^#\/casuale(?:\/(\w+))?$/))) showCriteria(m[1]);
   else if (h === '#/catalogo') showCatalog();
   else if (h === '#/remix') showRemix();
+  else if (h === '#/spesa') showSpesa();
   else showHome();
 }
 

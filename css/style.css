@@ -425,3 +425,11 @@ textarea:focus { outline: none; border-color: var(--accent); background: var(--s
 .dj-player audio { width: 100%; }
 .dj-player p { margin: 0; }
 .dj-note { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---- Lista della spesa ---- */
+.list.spesa li { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 8px; }
+.spesa-testa { display: flex; align-items: center; gap: 12px; }
+.spesa-voce .chips { padding-left: 64px; align-items: center; }
+.spesa-voce .chips .chip { min-height: 32px; padding: 4px 12px; font-size: .85rem; text-decoration: none; color: var(--text); display: inline-flex; align-items: center; }
+.spesa-voce.presa { opacity: .55; }
+.spesa-voce .txt .muted:last-child { white-space: normal; }

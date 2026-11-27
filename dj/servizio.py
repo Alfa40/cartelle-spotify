@@ -35,7 +35,9 @@ DJ = str(Path(__file__).with_name("dj.py"))
 CODA = r"C:\Progetti\coda\coda.mjs"
 NASCOSTO = 0x08000000 if sys.platform == "win32" else 0  # niente finestre nere che si aprono
 ORIGINI = re.compile(r"^(https://alfa40\.github\.io|http://127\.0\.0\.1(:\d+)?|http://localhost(:\d+)?)$")
+CARTELLA = Path.home() / "Desktop" / "Brani per il DJ AI"
 lock = threading.Lock()
+da_preparare: list[str] = []
 sveglia = threading.Event()
 
 
@@ -143,6 +145,14 @@ def esegui(x: dict) -> None:
         log(f"Richiesta {x['id']} errore: {errore[0][:300]}")
 
 
+def prepara(bid: str) -> None:
+    cmd = f'"{PYTHON}" -W ignore "{DJ}" prepara {bid}'
+    r = subprocess.run(["node", CODA, "--ram=8", "--gruppo=gpu", "--", cmd], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", creationflags=NASCOSTO)
+    riga = next((x for x in (r.stdout or "").splitlines() if x.startswith("Pronto")), (r.stderr or "errore").strip()[-200:])
+    log(f"Preparazione {bid}: {riga}")
+
+
 def lavoratore() -> None:
     while True:
         prossima = next((x for x in leggi() if x["stato"] == "in coda"), None)
@@ -153,8 +163,40 @@ def lavoratore() -> None:
                 aggiorna(prossima["id"], stato="errore", messaggio=str(e)[:300])
                 log(traceback.format_exc())
             continue
+        if da_preparare:                       # quando non ci sono remix da fare, si preparano i brani nuovi
+            prepara(da_preparare.pop(0))
+            continue
         sveglia.wait(30)
         sveglia.clear()
+
+
+def guarda_cartella() -> None:
+    """Importa da solo i file messi nella cartella "Brani per il DJ AI" sul desktop."""
+    fatti = CARTELLA / "Già importati"
+    fatti.mkdir(parents=True, exist_ok=True)
+    leggimi = CARTELLA / "LEGGIMI.txt"
+    if not leggimi.exists():
+        leggimi.write_text(
+            "Metti qui i brani comprati o copiati dai tuoi CD (mp3, flac, m4a, wav...), anche in sottocartelle.\n"
+            "Il PC li aggiunge da solo alla libreria del DJ AI e li sposta in 'Già importati'.\n"
+            "Solo file avuti in modo legale, per uso personale.\n", encoding="utf-8")
+    while True:
+        try:
+            adesso = time.time()
+            nuovi = [f for f in CARTELLA.rglob("*") if f.is_file() and f.suffix.lower() in libreria.ESTENSIONI
+                     and fatti not in f.parents and adesso - f.stat().st_mtime > 15]   # 15 s: copia finita
+            for f in nuovi:
+                importati = libreria.importa(f)
+                dest = fatti / f.relative_to(CARTELLA)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                f.replace(dest)
+                for b in importati:
+                    log(f"Importato dalla cartella: {b['artista']} – {b['titolo']}")
+                    da_preparare.append(b["id"])
+                    sveglia.set()
+        except Exception as e:
+            log(f"Cartella brani: {str(e)[:200]}")
+        time.sleep(60)
 
 
 # ---------------------------------------------------------------- coda su GitHub
@@ -300,6 +342,7 @@ def main() -> None:
         scrivi(tutte)
     threading.Thread(target=lavoratore, daemon=True).start()
     threading.Thread(target=controlla_github, daemon=True).start()
+    threading.Thread(target=guarda_cartella, daemon=True).start()
     log(f"DJ AI in ascolto su 127.0.0.1:{PORTA}")
     ThreadingHTTPServer(("127.0.0.1", PORTA), Gestore).serve_forever()
 
