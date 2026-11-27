@@ -1,11 +1,11 @@
-import * as auth from './auth.js?v=11';
-import * as api from './api.js?v=11';
-import * as folders from './folders.js?v=11';
-import * as lib from './library.js?v=11';
-import * as crit from './criteria.js?v=11';
-import * as catalog from './catalog.js?v=11';
-import * as tags from './tags.js?v=11';
-import { ICONS } from './icons.js?v=11';
+import * as auth from './auth.js?v=12';
+import * as api from './api.js?v=12';
+import * as folders from './folders.js?v=12';
+import * as lib from './library.js?v=12';
+import * as crit from './criteria.js?v=12';
+import * as catalog from './catalog.js?v=12';
+import * as tags from './tags.js?v=12';
+import { ICONS } from './icons.js?v=12';
 
 const app = document.getElementById('app');
 const showError = (msg) => toast(`Errore: ${msg}`, 8000);
@@ -657,15 +657,72 @@ async function showCriteria(moodId, source) {
         ${mood ? '<button id="btn-del-mood" class="link">Elimina questo mix</button>' : ''}
       </div>
     </section>
-    <div id="crit-body"><p class="muted center">Carico i tuoi brani…</p></div>
+    <section class="card">
+      <button id="btn-filters" class="primary filters-btn">🎛️ Scegli i filtri</button>
+      <div id="crit-status" class="muted small-text" style="margin-top:12px"></div>
+      <div id="active" class="chips" style="margin-top:12px"></div>
+    </section>
     <div class="bottom-bar">
       <button id="btn-save" class="ghost">💾 Salva</button>
       <button id="btn-go" class="primary" disabled>▶ Ascolta</button>
+    </div>
+    <div id="fpanel" class="fpanel" hidden>
+      <div class="fpanel-head">
+        <button id="fp-close" class="round" aria-label="Chiudi">✕</button>
+        <h2>Filtri</h2>
+        <button id="fp-reset" class="link">Azzera</button>
+      </div>
+      <div id="crit-body"><p class="muted center">Carico i tuoi brani…</p></div>
+      <div class="fpanel-foot"><button id="fp-done" class="primary">Fatto</button></div>
     </div>`;
   window.scrollTo(0, 0);
   const body = document.getElementById('crit-body');
   const src = document.getElementById('src');
   src.value = c.source;
+  const panel = document.getElementById('fpanel');
+  const openPanel = () => { panel.hidden = false; document.body.classList.add('no-scroll'); panel.scrollTop = 0; };
+  const closePanel = () => { panel.hidden = true; document.body.classList.remove('no-scroll'); };
+  document.getElementById('btn-filters').onclick = openPanel;
+  document.getElementById('fp-close').onclick = closePanel;
+  document.getElementById('fp-done').onclick = closePanel;
+  window.addEventListener('hashchange', () => document.body.classList.remove('no-scroll'), { once: true });
+
+  // Filtri attivi, come etichette con la ✕ per toglierli.
+  const artistName = (id) => tl.artists.find((a) => a.id === id)?.name || 'artista';
+  const famLabel = (f) => (f === crit.NO_GENRE ? 'Senza genere' : tags.familyName(f));
+  const activeList = () => {
+    const E = crit.empty(), out = [];
+    const arr = (k, label, no = false) => c[k].forEach((v) => out.push({ label: (no ? 'No ' : '') + label(v), off: no, clear: () => { c[k] = c[k].filter((x) => x !== v); } }));
+    arr('decades', DECADE_LABEL); arr('years', String);
+    if (c.yearFrom) out.push({ label: `Dal ${c.yearFrom}`, clear: () => { c.yearFrom = null; } });
+    if (c.yearTo) out.push({ label: `Fino al ${c.yearTo}`, clear: () => { c.yearTo = null; } });
+    arr('famIn', famLabel); arr('famOut', famLabel, true);
+    arr('genresIn', String); arr('genresOut', String, true);
+    arr('moodsIn', tags.moodName); arr('moodsOut', tags.moodName, true);
+    arr('artistsIn', artistName); arr('artistsOut', artistName, true);
+    arr('lengths', (v) => optLabel('lengths', v).split(' (')[0]);
+    for (const k of ['origin', 'explicit', 'versions', 'feat', 'liked', 'vote', 'added', 'pop', 'listen', 'limit', 'minutes']) {
+      if (c[k] !== E[k]) out.push({ label: k === 'limit' ? `Max ${c[k]} brani` : optLabel(k, c[k]), clear: () => { c[k] = E[k]; } });
+    }
+    if (c.skipRecent) out.push({ label: 'Niente ascolti recenti', clear: () => { c.skipRecent = false; } });
+    return out;
+  };
+  let actives = [];
+  const renderActive = () => {
+    actives = activeList();
+    const n = actives.length;
+    document.getElementById('btn-filters').innerHTML = `🎛️ Scegli i filtri${n ? ` <span class="badge light">${n}</span>` : ''}`;
+    document.getElementById('active').innerHTML = n
+      ? actives.map((a, i) => `<button class="chip ${a.off ? 'off' : 'on'} removable" data-rm="${i}">${esc(a.label)} <span class="x">✕</span></button>`).join('')
+      : '<span class="muted small-text">Nessun filtro: suona tutto in casuale. Premi “Scegli i filtri” per scegliere anni, generi, mood e altro.</span>';
+  };
+  renderActive();
+  document.getElementById('active').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-rm]');
+    if (!b) return;
+    actives[b.dataset.rm]?.clear();
+    refresh();
+  });
 
   const count = (k) => {
     const v = c[k];
@@ -772,6 +829,8 @@ async function showCriteria(moodId, source) {
     go.disabled = !n;
     const shown = crit.pick(crit.filter(pool, c), c, MAX_MIX).length;
     go.textContent = n ? `▶ Ascolta ${shown} ${shown === 1 ? 'brano' : 'brani'}` : 'Nessun brano';
+    document.getElementById('fp-done').textContent = n ? `Mostra ${n} ${n === 1 ? 'brano' : 'brani'}` : 'Nessun brano: togli qualche filtro';
+    renderActive();
     go.title = shown < n ? `${shown} scelti a caso tra ${n}` : '';
   };
 
@@ -851,11 +910,14 @@ async function showCriteria(moodId, source) {
       const bar = document.getElementById('load-bar'), txt = document.getElementById('load-txt');
       if (bar) bar.style.width = `${Math.max(3, Math.round((d / Math.max(t, 1)) * 100))}%`;
       if (txt) txt.textContent = `Letti ${d} elenchi di brani su ${t}…`;
+      const st = document.getElementById('crit-status');
+      if (st) st.textContent = `Leggo i tuoi brani: ${d} di ${t}…`;
     };
     try {
       [pool] = await Promise.all([poolFor(c.source, onProgress), loadListening(), needsLiked(c) ? lib.likedTracks().catch(() => {}) : null]);
       if (myLoad !== loadId || !stillHere()) return;
       tl = crit.tally(pool);
+      document.getElementById('crit-status').textContent = `${pool.length} brani tra cui scegliere`;
       render();
       if (pool.failed) toast(`${pool.failed} ${pool.failed === 1 ? 'playlist non si è letta' : 'playlist non si sono lette'}: le salto`);
     } catch (e) {
@@ -869,6 +931,7 @@ async function showCriteria(moodId, source) {
   };
 
   src.onchange = () => { c.source = src.value; load(); };
+  document.getElementById('fp-reset').onclick = () => document.getElementById('btn-reset').click();
   document.getElementById('btn-reset').onclick = () => {
     Object.assign(c, crit.empty(), { source: c.source });
     refresh();

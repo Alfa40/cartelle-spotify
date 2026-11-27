@@ -377,3 +377,28 @@ button.primary.soft {
   background: var(--accent-soft); color: var(--text); margin-top: 10px;
   box-shadow: 0 4px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+/* ---- Pannello dei filtri (a tutto schermo, come nelle app) ---- */
+.filters-btn { margin-top: 0 !important; font-size: 1.1rem !important; padding: 15px 20px !important; }
+.badge.light { background: rgba(255, 255, 255, .9); color: var(--accent-deep); margin-left: 6px; }
+.chip.removable { display: inline-flex; align-items: center; gap: 6px; }
+.chip.removable .x { font-size: .8em; opacity: .6; }
+.fpanel {
+  position: fixed; inset: 0; z-index: 8; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 16px; animation: up .38s var(--spring) !important;
+}
+.fpanel[hidden] { display: none; }
+.fpanel-head {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+  margin: 0 -16px 8px; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+.fpanel-head h2 { margin: 0; flex: 1; font-size: 1.5rem; font-weight: 900; }
+button.round { width: 44px; height: 44px; padding: 0; background: var(--surface); box-shadow: var(--shadow); font-size: 1rem; }
+.fpanel-foot {
+  position: sticky; bottom: 0; z-index: 2; margin: 0 -16px;
+  padding: 18px 16px calc(env(safe-area-inset-bottom) + 14px); background: linear-gradient(transparent, var(--bg) 30%);
+}
+.fpanel #crit-body { max-width: 640px; margin: 0 auto; }
+.fpanel-foot .primary { margin-top: 0; }
+.fpanel #crit-body { padding-bottom: 0; }
