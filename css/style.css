@@ -366,3 +366,10 @@ summary { cursor: pointer; padding: 8px 0; color: var(--accent-deep); font-weigh
 .bottom-bar .primary { padding: 12px 14px; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
 .hello h2 { font-size: 1.45rem; }
 .tile { min-height: 108px; }
+
+/* ---- Icone disegnate ---- */
+.tile .ico svg { width: 36px; height: 36px; display: block; }
+.folder-ico svg { width: 38px; height: 38px; display: block; }
+.hello .avatar svg { width: 32px; height: 32px; }
+/* iPhone: niente zoom quando si tocca un campo (serve testo di almeno 16px) */
+input, select { font-size: 16px; }

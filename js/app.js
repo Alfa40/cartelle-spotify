@@ -5,6 +5,7 @@ import * as lib from './library.js?v=7';
 import * as crit from './criteria.js?v=7';
 import * as catalog from './catalog.js?v=7';
 import * as tags from './tags.js?v=7';
+import { ICONS } from './icons.js?v=8';
 
 const app = document.getElementById('app');
 const btnLogout = document.getElementById('btn-logout');
@@ -81,7 +82,10 @@ function showLogin(message) {
 // apriamo l'app Spotify e, quando l'utente torna qui, facciamo partire la musica.
 let pendingPlay = null; // { run: (deviceId) => Promise, label }
 
-const SPOTIFY_APP = 'intent://open#Intent;scheme=spotify;package=com.spotify.music;S.browser_fallback_url=https%3A%2F%2Fopen.spotify.com%2F;end';
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const SPOTIFY_APP = IS_IOS
+  ? 'spotify:'
+  : 'intent://open#Intent;scheme=spotify;package=com.spotify.music;S.browser_fallback_url=https%3A%2F%2Fopen.spotify.com%2F;end';
 
 function pickDevice(list) {
   return list.find((d) => d.is_active)
@@ -121,12 +125,17 @@ document.addEventListener('visibilitychange', async () => {
         return;
       }
     } catch (e) {
-      toast(`Non parte: ${e.message}`);
-      return;
+      // Su iPhone Spotify in secondo piano a volte non risponde subito ("dispositivo non trovato"): si riprova.
+      if (!(e.status === 404 || e.status === 502 || e.status === 503) || i === 7) {
+        toast(`Non parte: ${e.message}`);
+        return;
+      }
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  toast('Spotify non risponde: fai partire un brano qualsiasi in Spotify e riprova');
+  toast(IS_IOS
+    ? 'Spotify non risponde: aprilo, fai partire un brano qualsiasi, torna qui e premi di nuovo ▶'
+    : 'Spotify non risponde: fai partire un brano qualsiasi in Spotify e riprova');
 });
 
 // ---------- Dati dell'account ----------
@@ -273,7 +282,7 @@ function showHome() {
   const mixes = crit.moods();
   app.innerHTML = `
     <section class="hello">
-      ${profile.images?.[0]?.url ? `<img src="${esc(profile.images[0].url)}" alt="">` : '<div class="avatar">🎧</div>'}
+      ${profile.images?.[0]?.url ? `<img src="${esc(profile.images[0].url)}" alt="">` : `<div class="avatar">${ICONS.headphones}</div>`}
       <div>
         <h2>${hi}, ${esc(firstName)}</h2>
         <p class="muted small-text online">Collegato a Spotify</p>
@@ -281,10 +290,10 @@ function showHome() {
     </section>
 
     <div class="tiles">
-      <button id="btn-criteria" class="tile t1"><span class="ico">🎲</span><b>Casuale</b><small>con i tuoi criteri</small></button>
-      <button id="btn-rate" class="tile t2"><span class="ico">🎧</span><b>Valuta</b><small>il brano in ascolto</small></button>
-      <button id="btn-new" class="tile t3"><span class="ico">📁</span><b>Nuova cartella</b><small>di playlist</small></button>
-      <button id="btn-catalog" class="tile t4"><span class="ico">🎛️</span><b>Remix</b><small>${catalogRun ? 'ricerca in corso…' : 'catalogo da scaricare'}</small></button>
+      <button id="btn-criteria" class="tile t1"><span class="ico">${ICONS.dice}</span><b>Casuale</b><small>con i tuoi criteri</small></button>
+      <button id="btn-rate" class="tile t2"><span class="ico">${ICONS.headphones}</span><b>Valuta</b><small>il brano in ascolto</small></button>
+      <button id="btn-new" class="tile t3"><span class="ico">${ICONS.folderPlus}</span><b>Nuova cartella</b><small>di playlist</small></button>
+      <button id="btn-catalog" class="tile t4"><span class="ico">${ICONS.deck}</span><b>Remix</b><small>${catalogRun ? 'ricerca in corso…' : 'catalogo da scaricare'}</small></button>
     </div>
 
     <section class="card">
@@ -293,7 +302,7 @@ function showHome() {
       <ul class="list folders">
         ${all.map((f) => `
           <li data-f="${esc(f.id)}" class="tap">
-            <div class="cover folder-ico" style="--h:${hue(f.name)}">📁</div>
+            <div class="cover folder-ico" style="--h:${hue(f.name)}">${ICONS.folder}</div>
             <div class="txt">
               <span class="name">${esc(f.name)}</span>
               <span class="muted small-text">${nPlaylist(f.playlists.length)}${f.off.length ? ` · ${f.playlists.length - f.off.length} spuntate` : ''}</span>
@@ -308,7 +317,7 @@ function showHome() {
       <ul class="list moods">
         ${mixes.map((m) => `
           <li data-m="${esc(m.id)}" class="tap">
-            <div class="cover folder-ico" style="--h:${hue(m.name)}">🎲</div>
+            <div class="cover folder-ico" style="--h:${hue(m.name)}">${ICONS.dice}</div>
             <div class="txt"><span class="name">${esc(m.name)}</span><span class="muted small-text">${esc(describe(m.criteria))}</span></div>
             <button class="play" data-play-m="${esc(m.id)}" aria-label="Fai partire ${esc(m.name)}">▶</button>
           </li>`).join('')}
