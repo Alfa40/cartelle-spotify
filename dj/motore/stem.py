@@ -9,6 +9,7 @@ from .percorsi import STEM, SR
 from . import libreria
 
 PARTI = ("vocals", "drums", "bass", "other")
+MODELLO = "htdemucs_ft"  # versione "fine-tuned": voce più pulita (4 modelli, più lento ma sulla GPU va bene)
 NOMI = {"vocals": "voce", "drums": "batteria", "bass": "basso", "other": "resto"}
 
 
@@ -18,17 +19,19 @@ def cartella(b: dict) -> Path:
 
 def separa(b: dict) -> Path:
     dest = cartella(b)
-    if all((dest / f"{p}.flac").exists() for p in PARTI):
+    segno = dest / "modello.txt"
+    if all((dest / f"{p}.flac").exists() for p in PARTI) and segno.exists() and segno.read_text().strip() == MODELLO:
         return dest
     import torch
     from demucs.separate import main as demucs_main
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     with tempfile.TemporaryDirectory() as tmp:
-        demucs_main(["-n", "htdemucs", "-d", dev, "--flac", "-o", tmp, str(libreria.percorso(b))])
-        uscita = next(Path(tmp).glob("htdemucs/*"))
+        demucs_main(["-n", MODELLO, "-d", dev, "--flac", "--shifts", "2", "-o", tmp, str(libreria.percorso(b))])
+        uscita = next(Path(tmp).glob(f"{MODELLO}/*"))
         dest.mkdir(parents=True, exist_ok=True)
         for p in PARTI:
             shutil.move(str(uscita / f"{p}.flac"), dest / f"{p}.flac")
+        segno.write_text(MODELLO)
     return dest
 
 

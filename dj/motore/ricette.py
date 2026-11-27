@@ -50,7 +50,7 @@ def edit(p: dict, b: dict, **_) -> np.ndarray:
 
     if "riser_drop" in eff and d >= 4:
         r = suoni.riser(4 * bat)
-        fx.metti(corpo, r, _s((d - 4) * bat), 0.8)
+        fx.metti(corpo, fx.catena(r, fx.LowpassFilter(7000)), _s((d - 4) * bat), 0.5)
     if "stop_prima_drop" in eff and d >= 1:
         a0, a1 = _s((d - 1) * bat + 3 * battito), _s(d * bat)
         corpo[:, a0:a1] = fx.stop_nastro(corpo[:, a0:a1])
@@ -60,7 +60,7 @@ def edit(p: dict, b: dict, **_) -> np.ndarray:
     if "impatto_drop" in eff and d >= 1:
         fx.metti(corpo, suoni.impatto(), _s(d * bat), 0.9)
     if "tromba_drop" in eff and d >= 1:
-        fx.metti(corpo, suoni.tromba(), _s(d * bat), 0.7)
+        fx.metti(corpo, fx.catena(suoni.tromba(), fx.LowpassFilter(4000)), _s(d * bat), 0.5)
     if "riverbero_pause" in eff:
         # Ogni 8 battute, l'ultimo battito va in riverbero (throw).
         for k in range(8, n_bat, 8):
@@ -73,7 +73,7 @@ def edit(p: dict, b: dict, **_) -> np.ndarray:
     if intro_b:
         intro = np.concatenate([giro] * max(1, intro_b // 4), axis=1)
         if "sirena_inizio" in eff:
-            fx.metti(intro, suoni.sirena(2 * bat), 0, 0.7)
+            fx.metti(intro, fx.catena(suoni.sirena(2 * bat), fx.LowpassFilter(3500)), 0, 0.45)
         if p.get("intro_filtro", True):
             intro = fx.filtro_sweep(intro, 500, 16000)
         pezzi.append(intro)
@@ -115,9 +115,9 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
             scelto = min(max(e, lo), hi)
             prove.append((abs(np.log(scelto / e)), scelto, scelto / e))
         _, bpm, r = min(prove)
-    voce = fx.stira(stem.carica(b, "vocals"), r)
-    if p.get("riverbero_voce"):
-        voce = fx.riverbero(voce, p["riverbero_voce"], 0.5)
+    voce = fx.stira(stem.carica(b, "vocals"), r, voce=True)
+    voce = fx.pulisci_voce(voce, float(p.get("riverbero_voce", 0.08)))
+    basso_orig = fx.stira(stem.carica(b, "bass") + 0.5 * stem.carica(b, "other"), r)
     altro = None
     if p.get("tieni_resto"):
         altro = fx.stira(stem.carica(b, "other"), r)
@@ -131,14 +131,14 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
     for i in range(corpo_b):
         sezioni.append("pausa" if p.get("pause", True) and i % 16 in (14, 15) else "pieno")
     sezioni += ["pieno"] * outro_b
-    beat = ritmi.base(gen, sezioni, a["tonica"], a["minore"], bpm)
+    pos = _s(intro_b * bat - t0)
+    radici = _radici(basso_orig, pos, len(sezioni), bat) if p.get("basso_dagli_accordi", True) else None
+    beat = ritmi.base(gen, sezioni, a["tonica"], a["minore"], bpm, radici)
     if p.get("sporco_808"):
         beat = fx.sporco(beat, p["sporco_808"])
 
     out = np.zeros_like(beat)
     fx.metti(out, beat, 0, float(p.get("vol_base", 0.9)))
-    pos = _s(intro_b * bat - t0)
-    voce = fx.catena(voce, fx.HighpassFilter(110))
     fx.metti(out, voce, pos, float(p.get("vol_voce", 1.1)))
     if altro is not None:
         fx.metti(out, altro, pos, float(p.get("vol_resto", 0.35)))
@@ -152,7 +152,34 @@ def remix(p: dict, b: dict, **_) -> np.ndarray:
     if p.get("impatto_inizio", True):
         fx.metti(out, suoni.impatto(), _s(intro_b * bat), 0.7)
     fine = _s(len(sezioni) * bat)
-    return fx.dissolvi(out[:, :fine], out_s=4 * bat)
+    out = fx.dissolvi(out[:, :fine], out_s=4 * bat)
+    return fx.eq_come(out, libreria.carica(b), float(p.get("eq_originale", 0.6)))
+
+
+def _radici(basso: np.ndarray, pos: int, n_batt: int, bat: float) -> list:
+    """Nota di basso (0–11) di ogni battuta, letta dal basso del brano originale già messo a tempo."""
+    import librosa
+    m = basso.mean(axis=0)
+    out = []
+    for i in range(n_batt):
+        a0, a1 = _s(i * bat) - pos, _s((i + 1) * bat) - pos
+        if a0 < 0 or a1 > len(m) or a1 - a0 < 2048:
+            out.append(None)
+            continue
+        seg = m[a0:a1]
+        if np.sqrt(np.mean(seg ** 2)) < 0.01:
+            out.append(None)
+            continue
+        c = librosa.feature.chroma_cqt(y=seg, sr=SR, hop_length=2048, fmin=librosa.note_to_hz("C1"), n_octaves=4).mean(axis=1)
+        out.append(int(np.argmax(c)))
+    # dove non si sente niente si tiene la nota della battuta prima
+    ultimo = None
+    for i, x in enumerate(out):
+        if x is None:
+            out[i] = ultimo
+        else:
+            ultimo = x
+    return out
 
 
 # ---------------------------------------------------------------- mashup
@@ -160,7 +187,10 @@ def _semitoni(a_voce: dict, a_base: dict) -> int:
     """Di quanti semitoni spostare la voce per stare nella tonalità della base (minore → relativa maggiore)."""
     pv = (a_voce["tonica"] + (3 if a_voce["minore"] else 0)) % 12
     pb = (a_base["tonica"] + (3 if a_base["minore"] else 0)) % 12
-    return ((pb - pv + 6) % 12) - 6
+    # Vanno bene anche le tonalità "vicine" (una quinta sopra o sotto): si sceglie lo spostamento più piccolo,
+    # perché la voce spostata di molti semitoni suona innaturale.
+    scelte = [((pb + d - pv + 6) % 12) - 6 for d in (0, 7, 5)]
+    return min(scelte, key=abs)
 
 
 def _prima_battuta_voce(b: dict, a: dict) -> int:
@@ -180,8 +210,8 @@ def mashup(p: dict, b: dict, con: dict | None = None, **_) -> np.ndarray:
     stem.separa(con)
     r = _velocita_voce(av["bpm"], ab["bpm"], False)
     semi = _semitoni(av, ab) if p.get("tonalita", "adatta") == "adatta" else int(p.get("semitoni", 0))
-    voce = fx.stira(stem.carica(b, "vocals"), r, semi)
-    voce = fx.catena(voce, fx.HighpassFilter(130))
+    voce = fx.stira(stem.carica(b, "vocals"), r, semi, voce=True)
+    voce = fx.pulisci_voce(voce, 0.1)
     base = stem.carica(con, "drums") + stem.carica(con, "bass") + float(p.get("vol_resto", 0.9)) * stem.carica(con, "other")
 
     va = _prima_battuta_voce(b, av)
@@ -204,9 +234,8 @@ def mashup(p: dict, b: dict, con: dict | None = None, **_) -> np.ndarray:
     out = np.zeros((2, max(base.shape[1], 1)), dtype=np.float32)
     fx.metti(out, base, 0, float(p.get("vol_base", 0.9)))
     fx.metti(out, voce, pos, float(p.get("vol_voce", 1.15)))
-    if p.get("riverbero_voce"):
-        out = fx.riverbero(out, 0.12, 0.5)
-    return fx.dissolvi(out, out_s=2 * ab["battuta"])
+    out = fx.dissolvi(out, out_s=2 * ab["battuta"])
+    return fx.eq_come(out, libreria.carica(con), 0.5)
 
 
 TIPI = {"velocita": velocita, "edit": edit, "remix": remix, "mashup": mashup}

@@ -53,16 +53,40 @@ def analizza(b: dict, forza: bool = False) -> dict:
         beat_t = beat_t[::2]
     beats = librosa.time_to_frames(beat_t, sr=SR, hop_length=512)
 
-    # Il primo tempo della battuta: quello dei 4 possibili con più colpi bassi (cassa).
+    # Griglia precisa: si provano BPM vicini (a passi di 0,01) e tutte le partenze possibili, e si tiene
+    # quella i cui battiti cadono di più sui colpi veri del brano. Così la griglia non "scivola" col tempo.
+    hop = 256
+    onset = librosa.onset.onset_strength(y=y, sr=SR, hop_length=hop)
+    fps = SR / hop
+    t_on = np.arange(len(onset)) / fps
+    migliore = (-1.0, bpm, 0.0)
+    for prova in np.arange(bpm * 0.98, bpm * 1.02, 0.01):
+        periodo = 60.0 / prova
+        k = np.arange(int((durata - 1) / periodo))
+        fasi = np.linspace(0, periodo, 48, endpoint=False)
+        tt = fasi[:, None] + k[None, :] * periodo
+        punti = np.interp(tt, t_on, onset).mean(axis=1)
+        i = int(np.argmax(punti))
+        if punti[i] > migliore[0]:
+            migliore = (float(punti[i]), float(prova), float(fasi[i]))
+    bpm, fase0 = migliore[1], migliore[2]
+    if abs(bpm - round(bpm)) < 0.06:      # quasi sempre i brani di studio hanno BPM intero
+        bpm = float(round(bpm))
+    periodo = 60.0 / bpm
+    griglia = fase0 + np.arange(int((durata - fase0) / periodo)) * periodo
+
+    # Quale dei 4 battiti è il primo della battuta: quello con più colpi bassi (cassa).
     from scipy.signal import butter, sosfilt
     y_bassi = sosfilt(butter(4, 150, "lowpass", fs=SR, output="sos"), y).astype(np.float32)
-    bassi = librosa.onset.onset_strength(y=y_bassi, sr=SR, hop_length=512)
-    forza_b = bassi[np.clip(beats, 0, len(bassi) - 1)] if len(beats) else np.array([])
-    fase = int(np.argmax([forza_b[p::4].mean() if len(forza_b[p::4]) else 0 for p in range(4)])) if len(beats) >= 8 else 0
-    primo = float(beat_t[fase]) if len(beat_t) > fase else 0.0
-    # Griglia regolare dal primo tempo (i brani moderni hanno il tempo fisso).
-    battuta = 4 * 60.0 / bpm
-    primo = primo % battuta
+    bassi = librosa.onset.onset_strength(y=y_bassi, sr=SR, hop_length=hop)
+    forza_b = np.interp(griglia, t_on, bassi)
+    fase = int(np.argmax([forza_b[p::4].mean() if len(forza_b[p::4]) else 0 for p in range(4)]))
+    battuta = 4 * periodo
+    primo = float(griglia[fase]) % battuta if len(griglia) > fase else 0.0
+
+    # Quanto il brano segue la griglia (1 = perfetto, brani di studio; meno = suonato dal vivo).
+    vicini = [np.min(np.abs(griglia - t)) for t in beat_t] if len(beat_t) else [1.0]
+    regolare = float(np.mean(np.array(vicini) < 0.035))
 
     tonica, minore, sicurezza = _tonalita(y)
 
@@ -74,8 +98,9 @@ def analizza(b: dict, forza: bool = False) -> dict:
         energia.append(float(np.sqrt(np.mean(y[a:z] ** 2)) + 1e-9))
 
     dati = {
-        "id": b["id"], "durata": round(durata, 3), "bpm": round(bpm, 2), "primo_tempo": round(primo, 4),
-        "battuta": round(battuta, 5), "battute": n_batt,
+        "id": b["id"], "durata": round(durata, 3), "bpm": round(bpm, 3), "primo_tempo": round(primo, 5),
+        "battuta": round(battuta, 6), "battute": n_batt, "regolare": round(regolare, 3),
+        "battiti": [round(float(t), 4) for t in beat_t],
         "tonica": tonica, "minore": minore, "nota": f"{NOTE[tonica]} {'minore' if minore else 'maggiore'}",
         "camelot": camelot(tonica, minore), "sicurezza_tonalita": round(sicurezza, 3),
         "energia": [round(e, 5) for e in energia],

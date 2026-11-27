@@ -28,12 +28,14 @@ def metti(dest: np.ndarray, x: np.ndarray, pos: int, vol: float = 1.0) -> None:
         dest[:, pos:pos + n] += vol * x[:, :n]
 
 
-def stira(x: np.ndarray, velocita: float, semitoni: float = 0.0) -> np.ndarray:
-    """Cambia velocità senza cambiare tono (e/o cambia tono senza cambiare velocità)."""
+def stira(x: np.ndarray, velocita: float, semitoni: float = 0.0, voce: bool = False) -> np.ndarray:
+    """Cambia velocità senza cambiare tono (e/o cambia tono senza cambiare velocità).
+    Per la voce: transitori morbidi e formanti preservate (niente effetto "cartone animato")."""
     if abs(velocita - 1) < 1e-3 and abs(semitoni) < 1e-3:
         return stereo(x)
     return stereo(time_stretch(stereo(x), SR, stretch_factor=velocita, pitch_shift_in_semitones=semitoni,
-                               high_quality=True))
+                               high_quality=True, transient_mode="smooth" if voce else "crisp",
+                               use_long_fft_window=voce, preserve_formants=True))
 
 
 def velocita_nastro(x: np.ndarray, fattore: float) -> np.ndarray:
@@ -128,3 +130,51 @@ def finalizza(x: np.ndarray, rms_db=-14.0) -> np.ndarray:
     rms = np.sqrt(np.mean(x ** 2)) + 1e-9
     x = x * (10 ** (rms_db / 20) / rms)
     return limitatore(x)
+
+
+def de_esser(x: np.ndarray, soglia: float = 0.35, lo: float = 5000, hi: float = 10000) -> np.ndarray:
+    """Abbassa le "s" e le "z" troppo forti (sibilanti), solo quando escono troppo."""
+    from scipy.ndimage import uniform_filter1d
+    from scipy.signal import butter, sosfiltfilt
+    x = stereo(x)
+    sos = butter(4, [lo, hi], "bandpass", fs=SR, output="sos")
+    banda = sosfiltfilt(sos, x, axis=1)
+    w = int(0.01 * SR)
+    env_b = uniform_filter1d(np.abs(banda).mean(axis=0), w) + 1e-9
+    env_t = uniform_filter1d(np.abs(x).mean(axis=0), w) + 1e-9
+    g = np.clip(soglia * env_t / env_b, 0.25, 1.0)
+    return (x - banda * (1 - g)[None, :]).astype(np.float32)
+
+
+def pulisci_voce(v: np.ndarray, riverbero_q: float = 0.08) -> np.ndarray:
+    """Catena per la voce separata: via i rimbombi sotto 80 Hz, sibilanti, compressione morbida,
+    un filo di calore e di riverbero per "incollarla" alla base."""
+    v = catena(v, HighpassFilter(80))
+    v = de_esser(v)
+    v = catena(v, Compressor(threshold_db=-22, ratio=3.0, attack_ms=6, release_ms=90),
+               LowShelfFilter(cutoff_frequency_hz=250, gain_db=1.5))
+    from pedalboard import HighShelfFilter
+    v = catena(v, HighShelfFilter(cutoff_frequency_hz=9000, gain_db=-2.0))
+    if riverbero_q:
+        v = catena(v, Reverb(room_size=0.35, damping=0.6, wet_level=riverbero_q, dry_level=1.0, width=0.8))
+    return v
+
+
+def eq_come(x: np.ndarray, riferimento: np.ndarray, quanto: float = 0.7, max_db: float = 6.0) -> np.ndarray:
+    """Equalizza x perché abbia lo stesso "colore" (bassi/medi/acuti) del riferimento, in modo dolce."""
+    from scipy.signal import firwin2, fftconvolve, welch
+    f, px = welch(stereo(x).mean(axis=0), SR, nperseg=8192)
+    _, pr = welch(stereo(riferimento).mean(axis=0), SR, nperseg=8192)
+    diff = 10 * np.log10((pr + 1e-12) / (px + 1e-12))
+    diff -= np.median(diff[(f > 300) & (f < 3000)])         # non cambia il volume generale
+    # media su terzi d'ottava per non seguire i dettagli
+    liscio = np.array([diff[(f >= fc / 1.12) & (f <= fc * 1.12)].mean() if np.any((f >= fc / 1.12) & (f <= fc * 1.12)) else 0
+                       for fc in f])
+    liscio = np.clip(liscio * quanto, -max_db, max_db)
+    liscio[f < 30] = 0
+    guad = 10 ** (liscio / 20)
+    frq = np.r_[f / (SR / 2)]
+    frq[-1] = 1.0
+    h = firwin2(2049, frq, guad)
+    y = np.vstack([fftconvolve(c, h, mode="same") for c in stereo(x)])
+    return y.astype(np.float32)

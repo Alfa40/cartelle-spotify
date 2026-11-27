@@ -40,8 +40,8 @@ def kick(f0=160.0, f1=45.0, dur=0.45, click=0.3) -> np.ndarray:
 def snare(dur=0.25) -> np.ndarray:
     t = _t(dur)
     tono = np.sin(2 * np.pi * 190 * t) * _env(dur, 0.05)
-    rum = _hp(_rng.uniform(-1, 1, len(t)), 1500) * _env(dur, 0.08)
-    return 0.6 * tono + 0.8 * rum
+    rum = _bp(_rng.uniform(-1, 1, len(t)), 1200, 6000) * _env(dur, 0.07)
+    return 0.7 * tono + 0.6 * rum
 
 
 def clap(dur=0.3) -> np.ndarray:
@@ -49,7 +49,7 @@ def clap(dur=0.3) -> np.ndarray:
     for k, ritardo in enumerate((0, 0.011, 0.022, 0.034)):
         a = int(ritardo * SR)
         n = len(x) - a
-        x[a:] += _bp(_rng.uniform(-1, 1, n), 900, 5000) * _env(n / SR, 0.012 if k < 3 else 0.09)
+        x[a:] += _bp(_rng.uniform(-1, 1, n), 800, 4000) * _env(n / SR, 0.012 if k < 3 else 0.09)
     return 0.7 * x
 
 
@@ -60,7 +60,7 @@ def rim(dur=0.08) -> np.ndarray:
 
 def hat(aperto=False) -> np.ndarray:
     dur = 0.35 if aperto else 0.06
-    x = _hp(_rng.uniform(-1, 1, int(dur * SR)), 7000) * _env(dur, 0.12 if aperto else 0.018)
+    x = _bp(_rng.uniform(-1, 1, int(dur * SR)), 5500, 9500) * _env(dur, 0.12 if aperto else 0.018)
     return 0.45 * x
 
 

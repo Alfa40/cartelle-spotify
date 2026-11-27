@@ -53,17 +53,19 @@ def battuta_s(genere: str, bpm: float | None = None) -> float:
     return 4 * 60.0 / (bpm or GENERI[genere]["bpm"])
 
 
-def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float | None = None) -> np.ndarray:
-    """Costruisce la base. sezioni: per ogni battuta 'intro', 'pieno', 'pausa' o 'silenzio'."""
+def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float | None = None,
+         radici: list | None = None) -> np.ndarray:
+    """Costruisce la base. sezioni: per ogni battuta 'intro', 'pieno', 'pausa' o 'silenzio'.
+    radici: per ogni battuta la nota di basso del brano originale (0 = Do … 11 = Si), così il basso segue gli accordi."""
     g = GENERI[genere]
     bat = battuta_s(genere, bpm)
     passo = bat / 16
     n = int(len(sezioni) * bat * SR) + SR * 2
     tracce = {k: np.zeros(n, dtype=np.float32) for k in ("batt", "alto", "basso")}
     suono = {
-        "kick": (suoni.kick(), "batt", 1.0), "snare": (suoni.snare(), "batt", 0.8), "clap": (suoni.clap(), "batt", 0.8),
-        "rim": (suoni.rim(), "alto", 0.6), "hat": (suoni.hat(), "alto", 0.55), "hat_aperto": (suoni.hat(True), "alto", 0.5),
-        "shaker": (suoni.shaker(), "alto", 0.6), "conga_alta": (suoni.conga(360), "alto", 0.6),
+        "kick": (suoni.kick(), "batt", 1.0), "snare": (suoni.snare(), "batt", 0.6), "clap": (suoni.clap(), "batt", 0.65),
+        "rim": (suoni.rim(), "alto", 0.4), "hat": (suoni.hat(), "alto", 0.32), "hat_aperto": (suoni.hat(True), "alto", 0.28),
+        "shaker": (suoni.shaker(), "alto", 0.35), "conga_alta": (suoni.conga(360), "alto", 0.6),
         "conga_bassa": (suoni.conga(220), "alto", 0.7),
     }
     nota_tonica = tonica % 12
@@ -88,7 +90,11 @@ def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float 
             for st, lung, grado in g["basso_note"]:
                 if not (meta <= st < meta + 16):
                     continue
-                semi = _grado(nota_tonica, minore, grado)
+                rad = radici[b] if radici and b < len(radici) and radici[b] is not None else None
+                if rad is not None:
+                    semi = rad + {4: 7, -3: -5}.get(grado, 0)     # tonica dell'accordo, o la sua quinta
+                else:
+                    semi = _grado(nota_tonica, minore, grado)
                 f = 32.70 * 2 ** (semi / 12)
                 while f < 38:      # tutte le note del basso tra circa 38 e 76 Hz
                     f *= 2
@@ -105,7 +111,7 @@ def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float 
                 pos = int((b * bat + (st - meta) * passo) * SR)
                 tracce["basso"][pos:pos + len(x)] += x[: n - pos]
     batt = stereo(tracce["batt"])
-    alto = catena(stereo(tracce["alto"]), HighpassFilter(300))
+    alto = catena(stereo(tracce["alto"]), HighpassFilter(300), LowpassFilter(8500))
     bas = stereo(tracce["basso"])
     if g["basso"] == "rumble":
         bas = catena(bas, Reverb(room_size=0.6, wet_level=0.4, dry_level=0.7), LowpassFilter(160))
@@ -122,7 +128,7 @@ def base(genere: str, sezioni: list[str], tonica: int, minore: bool, bpm: float 
                     k = min(int(0.09 * SR), n - p)
                     duck[p:p + k] = np.minimum(duck[p:p + k], np.linspace(0.35, 1, k))
         bas = bas * duck[None, :]
-    mix = batt + 0.8 * alto + 0.9 * bas
+    mix = batt + 0.7 * alto + 1.0 * bas
     # Nell'intro la base parte chiusa (filtro) e si apre.
     intro = sum(1 for s in sezioni if s == "intro")
     if intro:
